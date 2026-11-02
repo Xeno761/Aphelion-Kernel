@@ -1095,10 +1095,6 @@ struct task_struct {
 
 	struct nameidata		*nameidata;
 
-#ifdef CONFIG_SYSVIPC
-	struct sysv_sem			sysvsem;
-	struct sysv_shm			sysvshm;
-#endif
 #ifdef CONFIG_DETECT_HUNG_TASK
 	unsigned long			last_switch_count;
 	unsigned long			last_switch_time;
@@ -1551,9 +1547,31 @@ struct task_struct {
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
+#if defined(CONFIG_SYSVIPC) && !defined(__GENKSYMS__)
+	/* Use the existing 24-byte reserve area, not new task fields. */
+	union {
+		struct {
+			struct sysv_sem sysvsem;
+			struct sysv_shm sysvshm;
+		};
+		struct {
+			ANDROID_KABI_RESERVE(6);
+			ANDROID_KABI_RESERVE(7);
+			ANDROID_KABI_RESERVE(8);
+		};
+	};
+	_Static_assert(sizeof(struct sysv_sem) == sizeof(u64),
+		       "SYSVIPC semaphore state must fit reserve6");
+	_Static_assert(sizeof(struct sysv_shm) == 2 * sizeof(u64),
+		       "SYSVIPC shared-memory state must fit reserves7/8");
+	_Static_assert(__alignof__(struct sysv_sem) <= __alignof__(u64) &&
+		       __alignof__(struct sysv_shm) <= __alignof__(u64),
+		       "SYSVIPC state must not increase task alignment");
+#else
 	ANDROID_KABI_RESERVE(6);
 	ANDROID_KABI_RESERVE(7);
 	ANDROID_KABI_RESERVE(8);
+#endif
 
 	/*
 	 * New fields for task_struct should be added above here, so that
