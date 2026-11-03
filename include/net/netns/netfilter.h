@@ -29,6 +29,11 @@ struct netns_nf {
 	unsigned int defrag_ipv6_users;
 #endif
 
+#if IS_ENABLED(CONFIG_NF_TABLES)
+	/* Keep nftables generation state within the existing namespace ABI. */
+	ANDROID_KABI_USE(1, u8 nft_gencursor);
+#else
 	ANDROID_KABI_RESERVE(1);
+#endif
 };
 #endif

@@ -142,9 +142,7 @@ struct net {
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct netns_ct		ct;
 #endif
-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
-	struct netns_nftables	nft;
-#endif
+	/* nftables generation state uses the existing nf KABI reserve. */
 #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
 	struct netns_ft ft;
 #endif
