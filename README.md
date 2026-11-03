@@ -1,3 +1,58 @@
+# Aphelion Kernel For Lenovo TB373FU
+
+This source contains the configuration and final kernel changes used for the
+Aphelion 1.1 build with NTFS3 and controller feedback support. It is based on a
+preserved local MT6897 6.1.138 working-source import, not a verified pristine
+Motorola product release. The local baseline is
+`b03d256b3cd1d35499c15956e72028e89c2c084f` (tree
+`98f8eb82040aa07d1e74b8cdbfaec0c958ecb0a4`).
+
+Selected stable updates through the local 6.1.148 integration and thirteen later
+backports are retained with their original source references and attribution in
+the release commit. Vendor adaptations and exclusions mean this is not an
+unmodified complete upstream 6.1.148 or 6.1.182 tree. The existing 182 build label
+is an inherited release identity, not a claim of complete 182 patch coverage.
+
+## Release Configuration
+
+- `arch/arm64/configs/aphelion_defconfig` is the complete generated configuration
+  of the supplied NTFS3/controller-feedback build.
+- `arch/arm64/configs/aphelion_release.config` records the release capability
+  overlay. Old developer/iteration overlays have been removed.
+- Existing IPC, namespace, tmpfs ACL/xattr, IPv6 NAT, nftables/IPSet, BBRv1 and
+  optional CAKE capabilities are retained. Cubic remains the default TCP policy.
+- NTFS3 and Xbox/Nintendo/Logitech feedback options are included; existing
+  PlayStation/Sony support and OEM network/storage defaults are retained.
+- BBRv3, CASS, ThinLTO, new root engines/SUSFS, Baseband-Guard, MemKernel, NetHunter
+  additions and other abandoned development work are not part of this release.
+
+The supplied image was built and packaged, but runtime boot/stability testing was
+not performed. A release name without `rc` does not establish stability. Existing
+vendor-module compatibility limitations and version-check policy are inherited;
+this source does not claim a newly validated or security-hardened module ABI.
+
+## Building
+
+Use the Android clang-r487747c toolchain (Clang/LLD 17) and matching kernel build
+tools. The build also requires the matching device-source tree providing the
+external Kconfig/include dependencies. The preserved device-source identity is
+`21677a12b263056d5459513868bff715d8bbcd4b`; it is not a verified pristine Motorola
+release either. Keep it as a sibling named `kernel_device_modules-6.1`.
+
+```sh
+export PATH="$CLANG_DIR/bin:$KERNEL_BUILD_TOOLS/bin:$PATH"
+make O=../out-aphelion ARCH=arm64 LLVM=1 \
+    KCONFIG_EXT_PREFIX=../kernel_device_modules-6.1/ \
+    DEVICE_MODULES_REL_DIR=../kernel_device_modules-6.1 aphelion_defconfig
+make O=../out-aphelion ARCH=arm64 LLVM=1 \
+    KCONFIG_EXT_PREFIX=../kernel_device_modules-6.1/ \
+    DEVICE_MODULES_REL_DIR=../kernel_device_modules-6.1 -j6 Image
+```
+
+No boot images, signing keys, proprietary module binaries, device logs, internal
+planning files or development caches are included. Existing kernel licensing,
+copyright notices and upstream contribution guidance below are preserved.
+
 # How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
@@ -147,4 +202,3 @@ a maintainer tree)
 - If the patch is a new feature
     - tag the patch subject with `ANDROID:`
     - add a `Bug:` tag with the Android bug (required for android-specific features)
-
