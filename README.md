@@ -8,7 +8,7 @@
 [![Source](https://img.shields.io/badge/Source-aphelion--public-blue?style=flat-square)](https://github.com/Xeno761/Aphelion-Kernel/tree/aphelion-public)
 [![License](https://img.shields.io/badge/License-GPL--2.0-green?style=flat-square)](COPYING)
 
-[Download](https://github.com/Xeno761/Aphelion-Kernel/releases/latest) | [Installation](#installation) | [Changelog](https://github.com/Xeno761/Aphelion-Kernel/commits/aphelion-public)
+[Download](https://github.com/Xeno761/Aphelion-Kernel/releases/latest) | [Installation](#installation) | [Touch Driver](https://github.com/Xeno761/Aphelion-Kernel/tree/tb373fu-nt36532) | [Changelog](https://github.com/Xeno761/Aphelion-Kernel/commits/aphelion-public)
 
 </div>
 
@@ -67,6 +67,14 @@ Selected stable updates and 13 additional fixes cover ext4, buffer lifetime,
 crypto validation, key-state ordering, formatted-time pointer checks, IDR bounds,
 and hardirq-safe flexible-proportion accounting. Feature-grouped commits preserve
 their source references and original integration timeline.
+
+## Optional Touch Driver
+
+NT36532 touchscreen recovery fixes, driver source and separate packages are on the
+[TB373FU touch-driver branch](https://github.com/Xeno761/Aphelion-Kernel/tree/tb373fu-nt36532).
+This is an experimental, kernel-ABI-specific component, not a stock-kernel module.
+Read its compatibility, installation and rollback guide first. Its vendor_boot
+procedure is separate from the kernel-only installation below.
 
 ## Installation
 
