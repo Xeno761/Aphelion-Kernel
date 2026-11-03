@@ -72,9 +72,9 @@ their source references and original integration timeline.
 
 NT36532 touchscreen recovery fixes, driver source and separate packages are on the
 [TB373FU touch-driver branch](https://github.com/Xeno761/Aphelion-Kernel/tree/tb373fu-nt36532).
-This is an experimental, kernel-ABI-specific component, not a stock-kernel module.
-Read its compatibility, installation and rollback guide first. Its vendor_boot
-procedure is separate from the kernel-only installation below.
+Read its installation, AVB and rollback guide and check compatibility with your
+kernel and firmware. The driver package has a separate vendor_boot procedure;
+the kernel-only installation below remains a separate process.
 
 ## Installation
 
