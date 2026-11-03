@@ -1,59 +1,155 @@
-# Aphelion Kernel For Lenovo TB373FU
+<div align="center">
 
-This source contains the configuration and final kernel changes used for the
-Aphelion 1.1 build with NTFS3 and controller feedback support. It is based on a
-preserved local MT6897 6.1.138 working-source import, not a verified pristine
-Motorola product release. The local baseline is
-`b03d256b3cd1d35499c15956e72028e89c2c084f` (tree
-`98f8eb82040aa07d1e74b8cdbfaec0c958ecb0a4`).
+# Aphelion Kernel
 
-Selected stable updates through the local 6.1.148 integration and thirteen later
-backports are retained with their original source references and attribution in
-the release commit. Vendor adaptations and exclusions mean this is not an
-unmodified complete upstream 6.1.148 or 6.1.182 tree. The existing 182 build label
-is an inherited release identity, not a claim of complete 182 patch coverage.
+### Lenovo Idea Tab Pro | TB373FU | MT6897
 
-## Release Configuration
+[![Release](https://img.shields.io/github/v/release/Xeno761/Aphelion-Kernel?style=flat-square)](https://github.com/Xeno761/Aphelion-Kernel/releases/latest)
+[![Source](https://img.shields.io/badge/Source-aphelion--public-blue?style=flat-square)](https://github.com/Xeno761/Aphelion-Kernel/tree/aphelion-public)
+[![License](https://img.shields.io/badge/License-GPL--2.0-green?style=flat-square)](COPYING)
 
-- `arch/arm64/configs/aphelion_defconfig` is the complete generated configuration
-  of the supplied NTFS3/controller-feedback build.
-- `arch/arm64/configs/aphelion_release.config` records the release capability
-  overlay. Old developer/iteration overlays have been removed.
-- Existing IPC, namespace, tmpfs ACL/xattr, IPv6 NAT, nftables/IPSet, BBRv1 and
-  optional CAKE capabilities are retained. Cubic remains the default TCP policy.
-- NTFS3 and Xbox/Nintendo/Logitech feedback options are included; existing
-  PlayStation/Sony support and OEM network/storage defaults are retained.
-- BBRv3, CASS, ThinLTO, new root engines/SUSFS, Baseband-Guard, MemKernel, NetHunter
-  additions and other abandoned development work are not part of this release.
+[Download](https://github.com/Xeno761/Aphelion-Kernel/releases/latest) | [Installation](#installation) | [Changelog](https://github.com/Xeno761/Aphelion-Kernel/commits/aphelion-public)
 
-The supplied image was built and packaged, but runtime boot/stability testing was
-not performed. A release name without `rc` does not establish stability. Existing
-vendor-module compatibility limitations and version-check policy are inherited;
-this source does not claim a newly validated or security-hardened module ABI.
+</div>
 
-## Building
+## Release Build
 
-Use the Android clang-r487747c toolchain (Clang/LLD 17) and matching kernel build
-tools. The build also requires the matching device-source tree providing the
-external Kconfig/include dependencies. The preserved device-source identity is
-`21677a12b263056d5459513868bff715d8bbcd4b`; it is not a verified pristine Motorola
-release either. Keep it as a sibling named `kernel_device_modules-6.1`.
+| Component | Details |
+| --- | --- |
+| Device | Lenovo TB373FU / MT6897 |
+| Aphelion | 1.1.0 |
+| Kernel build label | 6.1.182-aphelion-v1.1.0 |
+| Source | Local 6.1.138 working baseline, selected stable updates through 6.1.148, and 13 later backports |
+| Download | `boot.img` only |
 
-```sh
-export PATH="$CLANG_DIR/bin:$KERNEL_BUILD_TOOLS/bin:$PATH"
-make O=../out-aphelion ARCH=arm64 LLVM=1 \
-    KCONFIG_EXT_PREFIX=../kernel_device_modules-6.1/ \
-    DEVICE_MODULES_REL_DIR=../kernel_device_modules-6.1 aphelion_defconfig
-make O=../out-aphelion ARCH=arm64 LLVM=1 \
-    KCONFIG_EXT_PREFIX=../kernel_device_modules-6.1/ \
-    DEVICE_MODULES_REL_DIR=../kernel_device_modules-6.1 -j6 Image
+The 182 version label does not mean that the complete upstream 6.1.182 series was
+merged. This source uses vendor adaptations and selected fixes; the local 138
+baseline is not claimed to be a verified pristine Motorola product release.
+
+## Added Over Stock
+
+### Container And Filesystem Support
+
+- **DroidSpaces kernel prerequisites:** System V IPC, IPC namespaces, POSIX message
+  queues, and PID namespaces, with the shipped KABI reserve adaptations.
+- **devtmpfs** without Android automount, and **MACVLAN** support.
+- **tmpfs extended attributes and POSIX ACLs**.
+- **NTFS3** built in for NTFS USB-drive filesystem support.
+
+These are kernel capabilities, not a guarantee that every container, mount, or
+userspace application works without its own setup.
+
+### Networking
+
+- **IPv6 NAT and MASQUERADE**.
+- **nftables** with IPv4/IPv6/inet tables and the shipped NAT, connection-tracking,
+  limit, reject, redirect, and compatibility support.
+- **IPSet** `hash:ip`, `hash:net`, and `xt_set` support.
+- **BBRv1** available as a TCP congestion-control option.
+- **CAKE** available as a built-in queue-management option.
+
+**Cubic remains the default.** CAKE is not applied automatically; traffic shaping
+requires suitable userspace configuration and bandwidth settings.
+
+### Controller Feedback
+
+- **Xbox:** rumble and supported controller LEDs.
+- **Nintendo:** rumble support.
+- **Logitech:** force feedback for the enabled controller families.
+
+Existing PlayStation/Sony support is retained, not claimed as a new addition.
+The release also retains its existing MGLRU, PSI, zram/LZ4, USB Ethernet, and exFAT
+capabilities without presenting them as newly implemented performance features.
+
+### Fixes
+
+Selected stable updates and 13 additional fixes cover ext4, buffer lifetime,
+crypto validation, key-state ordering, formatted-time pointer checks, IDR bounds,
+and hardirq-safe flexible-proportion accounting. Feature-grouped commits preserve
+their source references and original integration timeline.
+
+## Installation
+
+Use this image only with the matching TB373FU firmware/vendor-module setup. Keep a
+known-good boot image and a tested way to return to fastbootd before flashing.
+The bootloader must already be unlocked; unlocking can erase data and is not part
+of these instructions. Do not use this image on another device or assume that
+every firmware version is compatible.
+
+### 1. Download And Verify
+
+Download `boot.img` from [Release Build](https://github.com/Xeno761/Aphelion-Kernel/releases/latest)
+and open a terminal in the same folder using recent Android platform-tools.
+
+```powershell
+Get-FileHash .\boot.img -Algorithm SHA256
 ```
 
-No boot images, signing keys, proprietary module binaries, device logs, internal
-planning files or development caches are included. Existing kernel licensing,
-copyright notices and upstream contribution guidance below are preserved.
+Expected SHA-256:
 
-# How do I submit patches to Android Common Kernels
+```text
+7d15a84df04788dbc0bad198340ab151e7766428f63c3cacd0e815545be5b728
+```
+
+### 2. Enter Fastbootd And Check The Target
+
+```sh
+adb reboot fastboot
+fastboot devices
+fastboot getvar product
+fastboot getvar is-userspace
+fastboot getvar current-slot
+```
+
+Wait for **`is-userspace: yes`** and verify that the target is your TB373FU and
+**`current-slot: a`**. Stop if a check fails or the active slot is not `a`; do not
+guess a partition or change slots. Ordinary bootloader-fastboot writes were
+unreliable on this unit, so use **fastbootd**, not `adb reboot bootloader`.
+
+### 3. Flash Only The Active Boot Partition
+
+```sh
+fastboot flash boot_a boot.img
+fastboot reboot
+```
+
+Continue only if the write finishes successfully. Do not flash `boot_b`,
+`vendor_boot`, `dtbo`, `vbmeta`, or a `*_dlkm` partition, erase data, or disable
+verification. No recovery/ZIP installer is used.
+
+### Rollback
+
+If Android does not boot, use the device's recovery procedure to reach fastbootd,
+recheck the same target/slot, and restore your exact previously working image:
+
+```sh
+fastboot flash boot_a backup-boot.img
+fastboot reboot
+```
+
+Do not download a random image as a substitute for that firmware-specific backup.
+
+## Validation
+
+The supplied image was built and packaged successfully. Runtime boot and stability
+testing of this final NTFS3/controller-feedback image was not performed. Its
+release name does not establish stability or a new vendor-module ABI validation.
+
+## Source And Credits
+
+Release configuration: `arch/arm64/configs/aphelion_defconfig`; capability overlay:
+`arch/arm64/configs/aphelion_release.config`. Building requires clang-r487747c
+(Clang/LLD 17) and the matching `kernel_device_modules-6.1` Kconfig/include tree.
+
+Kernel licensing, copyrights, and upstream author credits are retained. The
+feature-grouped commit messages contain the original patch authors, upstream and
+stable references, and vendor-adaptation notes. See [COPYING](COPYING),
+[CREDITS](CREDITS), and the [source history](https://github.com/Xeno761/Aphelion-Kernel/commits/aphelion-public).
+
+<details>
+<summary>Upstream Android Common contribution guidance</summary>
+
+## How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
    These patches will be merged automatically in the corresponding common kernels. If the patch is already
@@ -202,3 +298,5 @@ a maintainer tree)
 - If the patch is a new feature
     - tag the patch subject with `ANDROID:`
     - add a `Bug:` tag with the Android bug (required for android-specific features)
+
+</details>
