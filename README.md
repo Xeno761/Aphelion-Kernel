@@ -173,6 +173,14 @@ release name does not establish stability or a new vendor-module ABI validation.
 Release configuration: `arch/arm64/configs/aphelion_defconfig`; capability overlay:
 `arch/arm64/configs/aphelion_release.config`. Building requires clang-r487747c
 (Clang/LLD 17) and the matching `kernel_device_modules-6.1` Kconfig/include tree.
+Initialize the pinned ReSukiSU and Baseband-Guard sources after cloning:
+
+```sh
+git submodule update --init --recursive
+```
+
+Set `LOCALVERSION=` (an explicitly empty value) during Kbuild to reproduce the
+exact `6.1.182-aphelion-v1.2.0` release label without an untagged-source `+`.
 
 Kernel licensing, copyrights, and upstream author credits are retained. The
 feature-grouped commit messages contain the original patch authors, upstream and
