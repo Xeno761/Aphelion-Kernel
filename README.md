@@ -100,10 +100,10 @@ and open a terminal in the same folder using recent Android platform-tools.
 Get-FileHash .\boot.img -Algorithm SHA256
 ```
 
-Expected SHA-256 for the v1.1.0 boot image:
+Expected SHA-256 for the v1.2.0 boot image:
 
 ```text
-7d15a84df04788dbc0bad198340ab151e7766428f63c3cacd0e815545be5b728
+deb3919ddf2eb9f162d5680a739455b6b677d39f78b9e084d1b49755c4a55792
 ```
 
 ### 2. Enter Fastbootd And Check The Target
