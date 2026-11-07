@@ -17,8 +17,8 @@
 | Component | Details |
 | --- | --- |
 | Device | Lenovo TB373FU / MT6897 |
-| Aphelion | 1.1.0 |
-| Kernel build label | 6.1.182-aphelion-v1.1.0 |
+| Aphelion | 1.2.0 |
+| Kernel build label | 6.1.182-aphelion-v1.2.0 |
 | Source | Local 6.1.138 working baseline, selected stable updates through 6.1.148, and 13 later backports |
 | Download | `boot.img` only |
 
@@ -27,6 +27,21 @@ merged. This source uses vendor adaptations and selected fixes; the local 138
 baseline is not claimed to be a verified pristine Motorola product release.
 
 ## Added Over Stock
+
+### Root And Device Protection
+
+- **ReSukiSU/BakaSU v4.2.0-rc1 (v35134, UAPI 4)** with SUSFS 2.3.0 inline
+  hooks and multi-manager certificate recognition.
+- The static manager set includes ReSukiSU/BakaSU, Official KernelSU,
+  Magic-KSU/MKSU, RKSU, SukiSU-Ultra, KoWSU, KernelSU-Next `v3.4.0`, and
+  Wild KSU `v3.1.2`.
+- KernelSU-Next `v3.4.0` is the verified full foreign core-manager match.
+  Wild KSU `v3.1.2` supports core operations but not profile editing; the other
+  identities are retained for their compatible historical manager builds.
+- Current UAPI 6 managers and fork-only features such as KPM, SuperKey,
+  YukiZygisk, FolkZygisk, and foreign LKM installation are not provided by
+  certificate recognition and are not advertised as compatible.
+- **Baseband-Guard** LSM protection for critical partitions and device nodes.
 
 ### Container And Filesystem Support
 
@@ -103,7 +118,7 @@ and open a terminal in the same folder using recent Android platform-tools.
 Get-FileHash .\boot.img -Algorithm SHA256
 ```
 
-Expected SHA-256:
+Expected SHA-256 for the v1.1.0 boot image:
 
 ```text
 7d15a84df04788dbc0bad198340ab151e7766428f63c3cacd0e815545be5b728

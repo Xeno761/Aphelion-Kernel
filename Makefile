@@ -1393,6 +1393,12 @@ prepare0: archprepare
 
 # All the preparing..
 prepare: prepare0
+ifneq ($(CONFIG_KSU),)
+prepare: ksu-selinux-headers
+PHONY += ksu-selinux-headers
+ksu-selinux-headers: prepare0
+	$(Q)$(MAKE) $(build)=security/selinux security/selinux/flask.h
+endif
 ifdef CONFIG_RUST
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/rust_is_available.sh
 	$(Q)$(MAKE) $(build)=rust

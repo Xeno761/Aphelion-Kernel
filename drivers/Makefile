@@ -189,5 +189,12 @@ obj-$(CONFIG_COUNTER)		+= counter/
 obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
+obj-$(CONFIG_KSU)		+= kernelsu/
+
+# Pin KernelSU-Next v3.4.0 and Wild KSU v3.1.2 manager certificates.
+export KSU_EXPECTED_SIZE := 0x3e6
+export KSU_EXPECTED_HASH := 79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7
+export KSU_EXPECTED_PR_BUILD_SIZE := 0x381
+export KSU_EXPECTED_PR_BUILD_HASH := 52d52c546f75448464566da175d72b2c147bc5cb55a10886941da2a20ca2efac
 
 include $(KCONFIG_EXT_PREFIX)Makefile.ext
