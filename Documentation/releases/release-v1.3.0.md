@@ -14,7 +14,7 @@
 
 ### Verification & Flashing
 
-- **Asset:** boot.img (67,108,864 bytes, AVB signed)
+- **Asset:** oot.img (67,108,864 bytes, AVB signed)
 - **SHA-256:** efdf9c39bf2f33ac80c520f2358696d5f7f1545aef03d9a93a9d9f7b9067dcf
 
 `sh
