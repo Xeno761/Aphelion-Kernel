@@ -53,7 +53,7 @@ CFLAGS_version.o := -include $(obj)/utsversion-tmp.h
 #
 
 include/generated/utsversion.h: build-version-auto = $(shell $(srctree)/$(src)/build-version)
-include/generated/utsversion.h: build-timestamp-auto = $(shell LC_ALL=C date)
+include/generated/utsversion.h: build-timestamp-auto = $(shell TZ='Asia/Kolkata' LC_ALL=C date '+%a %b %d %H:%M:%S %Z %Y')
 include/generated/utsversion.h: FORCE
 	$(call filechk,uts_version)
 
