@@ -548,6 +548,24 @@ struct sched_statistics {
 #endif /* CONFIG_SCHEDSTATS */
 } ____cacheline_aligned;
 
+#ifdef CONFIG_SCHED_BORE
+typedef union {
+	u16	u16;
+	s16	s16;
+	u8	u8[2];
+	s8	s8[2];
+} x16;
+
+typedef union {
+	u32	u32;
+	s32	s32;
+	u16	u16[2];
+	s16	s16[2];
+	u8	u8[4];
+	s8	s8[4];
+} x32;
+#endif // CONFIG_SCHED_BORE
+
 struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
@@ -583,10 +601,29 @@ struct sched_entity {
 	struct sched_avg		avg;
 #endif
 
+#ifdef CONFIG_SCHED_BORE
+	union {
+		struct {
+			u64	burst_time;
+			u16	prev_burst_penalty;
+			u16	curr_burst_penalty;
+			u16	burst_penalty;
+			u16	_bore_pad;
+		};
+		struct {
+			ANDROID_KABI_RESERVE(1);
+			ANDROID_KABI_RESERVE(2);
+		};
+	};
+	_Static_assert(sizeof(u64) + 4 * sizeof(u16) == 2 * sizeof(u64), "BORE sched_entity state must fit reserve1/2");
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
+#else
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
+#endif
 };
 
 struct sched_rt_entity {
@@ -1543,10 +1580,32 @@ struct task_struct {
 	union rv_task_monitor		rv[RV_PER_TASK_MONITORS];
 #endif
 	ANDROID_KABI_USE(1, unsigned int saved_state);
+#ifdef CONFIG_SCHED_BORE
+	union {
+		struct {
+			u16	child_burst_cache;
+			u16	child_burst_count_cache;
+			u32	_bore_pad1;
+			u64	child_burst_last_cached;
+			u16	group_burst_cache;
+			u16	_bore_pad2;
+			u32	_bore_pad3;
+			u64	group_burst_last_cached;
+		};
+		struct {
+			ANDROID_KABI_RESERVE(2);
+			ANDROID_KABI_RESERVE(3);
+			ANDROID_KABI_RESERVE(4);
+			ANDROID_KABI_RESERVE(5);
+		};
+	};
+	_Static_assert(sizeof(u16)*2 + sizeof(u32) + sizeof(u64) + sizeof(u16)*2 + sizeof(u32) + sizeof(u64) == 4 * sizeof(u64), "BORE task_struct state must fit reserve2..5");
+#else
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
+#endif
 #if defined(CONFIG_SYSVIPC) && !defined(__GENKSYMS__)
 	/* Use the existing 24-byte reserve area, not new task fields. */
 	union {
