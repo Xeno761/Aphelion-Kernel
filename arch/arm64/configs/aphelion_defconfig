@@ -534,7 +534,7 @@ CONFIG_UNWIND_PATCH_PAC_INTO_SCS=y
 #
 # Boot options
 #
-CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.page_alloc.sample=0 kasan.stacktrace=off kasan.mode=async kasan.vmalloc=off workqueue.power_efficient=1 kfence.sample_interval=0 jiffies_till_first_fqs=16 jiffies_till_next_fqs=16 rcutree.enable_rcu_lazy=1 transparent_hugepage=madvise kvm-arm.mode=protected bootconfig ioremap_guard"
+CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.page_alloc.sample=0 kasan.stacktrace=off kasan.mode=async kasan.vmalloc=off workqueue.power_efficient=1 kfence.sample_interval=0 jiffies_till_first_fqs=16 jiffies_till_next_fqs=16 rcutree.enable_rcu_lazy=1 transparent_hugepage=madvise kvm-arm.mode=protected bootconfig ioremap_guard cpuidle.governor=teo"
 # CONFIG_CMDLINE_FROM_BOOTLOADER is not set
 CONFIG_CMDLINE_EXTEND=y
 # CONFIG_CMDLINE_FORCE is not set
