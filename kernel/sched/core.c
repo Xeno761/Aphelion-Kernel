@@ -1343,7 +1343,7 @@ static void set_load_weight(struct task_struct *p, bool update_load)
 static DEFINE_MUTEX(uclamp_mutex);
 
 /* Max allowed minimum utilization */
-static unsigned int __maybe_unused sysctl_sched_uclamp_util_min = SCHED_CAPACITY_SCALE;
+static unsigned int __maybe_unused sysctl_sched_uclamp_util_min = 0;
 
 /* Max allowed maximum utilization */
 static unsigned int __maybe_unused sysctl_sched_uclamp_util_max = SCHED_CAPACITY_SCALE;
@@ -1363,7 +1363,7 @@ static unsigned int __maybe_unused sysctl_sched_uclamp_util_max = SCHED_CAPACITY
  * This knob will not override the system default sched_util_clamp_min defined
  * above.
  */
-static unsigned int sysctl_sched_uclamp_util_min_rt_default = 768;
+static unsigned int sysctl_sched_uclamp_util_min_rt_default = 0;
 
 /* All clamps are required to be less or equal than these values */
 static struct uclamp_se uclamp_default[UCLAMP_CNT];
@@ -1847,10 +1847,7 @@ static int sysctl_sched_uclamp_handler(struct ctl_table *table, int write,
 	if (!write)
 		goto done;
 
-	if (table->data == &sysctl_sched_uclamp_util_min_rt_default &&
-	    sysctl_sched_uclamp_util_min_rt_default < 768) {
-		sysctl_sched_uclamp_util_min_rt_default = 768;
-	}
+/* Clamp check removed: allow full dynamic scaling */
 
 	if (sysctl_sched_uclamp_util_min > sysctl_sched_uclamp_util_max ||
 	    sysctl_sched_uclamp_util_max > SCHED_CAPACITY_SCALE	||
