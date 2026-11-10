@@ -2433,6 +2433,22 @@ int input_register_device(struct input_dev *dev)
 	/* Make sure that bitmasks not mentioned in dev->evbit are clean. */
 	input_cleanse_bitmasks(dev);
 
+	/*
+	 * Novatek capacitive touchscreen reports a fake 1-bit binary pressure
+	 * (max <= 1). In Android InputFlinger, this causes light taps and quick
+	 * contact where raw pressure is 0 to be filtered out as noise.
+	 * Clearing ABS_MT_PRESSURE ensures Android treats the panel as an
+	 * uncalibrated contact digitizer, assigning constant solid 1.0 pressure
+	 * to every physical touch contact and eliminating all dropped light taps.
+	 */
+	if (dev->name && strstr(dev->name, "NVTCapacitiveTouchScreen")) {
+		if (test_bit(ABS_MT_PRESSURE, dev->absbit))
+			__clear_bit(ABS_MT_PRESSURE, dev->absbit);
+		if (test_bit(ABS_PRESSURE, dev->absbit))
+			__clear_bit(ABS_PRESSURE, dev->absbit);
+		pr_info("input: %s: cleared fake 1-bit pressure to eliminate dropped light touches\n", dev->name);
+	}
+
 	packet_size = input_estimate_events_per_packet(dev);
 	if (dev->hint_events_per_packet < packet_size)
 		dev->hint_events_per_packet = packet_size;
