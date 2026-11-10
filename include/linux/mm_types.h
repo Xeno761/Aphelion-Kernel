@@ -29,6 +29,10 @@
 
 #define INIT_PASID	0
 
+typedef unsigned int __bitwise cydp_t;
+#define CYDP_CLEAR_YOUNG	((__force cydp_t)BIT(0))
+#define CYDP_CLEAR_DIRTY	((__force cydp_t)BIT(1))
+
 struct address_space;
 struct mem_cgroup;
 

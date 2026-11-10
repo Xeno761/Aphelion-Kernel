@@ -360,6 +360,15 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 	dsb(ish);
 }
 
+static inline void __flush_tlb_range_nosync(struct mm_struct *mm,
+				     unsigned long start, unsigned long end,
+				     unsigned long stride, bool last_level,
+				     int tlb_level)
+{
+	struct vm_area_struct vma = { .vm_mm = mm };
+	__flush_tlb_range(&vma, start, end, stride, last_level, tlb_level);
+}
+
 static inline void flush_tlb_range(struct vm_area_struct *vma,
 				   unsigned long start, unsigned long end)
 {

@@ -144,6 +144,12 @@ static inline void page_table_check_pte_set(struct mm_struct *mm,
 {
 }
 
+static inline void page_table_check_ptes_set(struct mm_struct *mm,
+					     pte_t *ptep, pte_t pte,
+					     unsigned int nr)
+{
+}
+
 static inline void page_table_check_pmd_set(struct mm_struct *mm,
 					    unsigned long addr, pmd_t *pmdp,
 					    pmd_t pmd)

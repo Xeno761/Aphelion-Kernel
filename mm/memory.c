@@ -4230,12 +4230,85 @@ out_release:
  * but allow concurrent faults), and pte mapped but not yet locked.
  * We return with mmap_lock still held, but pte unmapped and unlocked.
  */
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+static struct folio *alloc_anon_folio(struct vm_fault *vmf)
+{
+	struct vm_area_struct *vma = vmf->vma;
+	unsigned long orders;
+	struct folio *folio;
+	unsigned long addr;
+	pte_t *pte;
+	gfp_t gfp;
+	int order;
+
+	if (unlikely(userfaultfd_armed(vma)))
+		return NULL;
+
+	orders = thp_vma_allowable_orders(vma, vma->vm_flags,
+			TVA_IN_PF | TVA_ENFORCE_SYSFS, BIT(PMD_ORDER) - 1);
+	orders = thp_vma_suitable_orders(vma, vmf->address, orders);
+
+	if (!orders)
+		return NULL;
+
+	pte = pte_offset_map(vmf->pmd, vmf->address & PMD_MASK);
+	if (!pte)
+		return NULL;
+
+	order = highest_order(orders);
+	while (orders) {
+		int i, nr = 1 << order;
+		bool all_none = true;
+		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
+		for (i = 0; i < nr; i++) {
+			if (!pte_none(pte[pte_index(addr) + i])) {
+				all_none = false;
+				break;
+			}
+		}
+		if (all_none)
+			break;
+		order = next_order(&orders, order);
+	}
+
+	pte_unmap(pte);
+
+	if (!orders)
+		return NULL;
+
+	gfp = vma_thp_gfp_mask(vma);
+	while (orders) {
+		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
+		folio = vma_alloc_folio(gfp, order, vma, addr, true);
+		if (folio) {
+			if (mem_cgroup_charge(folio, vma->vm_mm, gfp)) {
+				count_mthp_stat(order, MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE);
+				folio_put(folio);
+				goto next;
+			}
+			cgroup_throttle_swaprate(&folio->page, gfp);
+			clear_huge_page(&folio->page, vmf->address, 1 << order);
+			return folio;
+		}
+next:
+		count_mthp_stat(order, MTHP_STAT_ANON_FAULT_FALLBACK);
+		order = next_order(&orders, order);
+	}
+
+	return NULL;
+}
+#endif
+
 static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
+	struct folio *folio = NULL;
+	unsigned long addr = vmf->address;
+	int nr_pages = 1;
 	struct page *page;
 	vm_fault_t ret = 0;
 	pte_t entry;
+	int i;
 
 	/* File mapping without ->vm_ops ? */
 	if (vma->vm_flags & VM_SHARED)
@@ -4283,13 +4356,26 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
-	page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
-	if (!page)
-		goto oom;
 
-	if (mem_cgroup_charge(page_folio(page), vma->vm_mm, GFP_KERNEL))
-		goto oom_free_page;
-	cgroup_throttle_swaprate(page, GFP_KERNEL);
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	folio = alloc_anon_folio(vmf);
+#endif
+	if (folio) {
+		page = &folio->page;
+		nr_pages = folio_nr_pages(folio);
+		addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
+	} else {
+		page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
+		if (!page)
+			goto oom;
+
+		if (mem_cgroup_charge(page_folio(page), vma->vm_mm, GFP_KERNEL))
+			goto oom_free_page;
+		cgroup_throttle_swaprate(page, GFP_KERNEL);
+		folio = page_folio(page);
+		nr_pages = 1;
+		addr = vmf->address;
+	}
 
 	/*
 	 * The memory barrier inside __SetPageUptodate makes sure that
@@ -4304,11 +4390,21 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
 
-	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, vmf->address,
+	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr,
 			&vmf->ptl);
-	if (!pte_none(*vmf->pte)) {
-		update_mmu_tlb(vma, vmf->address, vmf->pte);
-		goto release;
+	if (nr_pages == 1) {
+		if (!pte_none(*vmf->pte)) {
+			update_mmu_tlb(vma, vmf->address, vmf->pte);
+			goto release;
+		}
+	} else {
+		for (i = 0; i < nr_pages; i++) {
+			if (!pte_none(vmf->pte[i])) {
+				for (i = 0; i < nr_pages; i++)
+					update_mmu_tlb(vma, addr + PAGE_SIZE * i, vmf->pte + i);
+				goto release;
+			}
+		}
 	}
 
 	ret = check_stable_address_space(vma->vm_mm);
@@ -4322,14 +4418,25 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
 
-	inc_mm_counter_fast(vma->vm_mm, MM_ANONPAGES);
-	page_add_new_anon_rmap(page, vma, vmf->address);
-	lru_cache_add_inactive_or_unevictable(page, vma);
+	if (nr_pages > 1) {
+		folio_ref_add(folio, nr_pages - 1);
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+		count_mthp_stat(folio_order(folio), MTHP_STAT_ANON_FAULT_ALLOC);
+#endif
+		page_add_new_anon_rmap(page, vma, addr);
+		lru_cache_add_inactive_or_unevictable(page, vma);
+	} else {
+		inc_mm_counter_fast(vma->vm_mm, MM_ANONPAGES);
+		page_add_new_anon_rmap(page, vma, vmf->address);
+		lru_cache_add_inactive_or_unevictable(page, vma);
+	}
 setpte:
-	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
+	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
 
 	/* No need to invalidate - it was non-present before */
-	update_mmu_cache(vma, vmf->address, vmf->pte);
+	for (i = 0; i < nr_pages; i++)
+		update_mmu_cache(vma, addr + i * PAGE_SIZE, vmf->pte + i);
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 	return ret;

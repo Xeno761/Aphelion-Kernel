@@ -55,6 +55,10 @@
  * Defrag is invoked by khugepaged hugepage allocations and by page faults
  * for all hugepage allocations.
  */
+unsigned long huge_anon_orders_always __read_mostly;
+unsigned long huge_anon_orders_madvise __read_mostly;
+unsigned long huge_anon_orders_inherit __read_mostly;
+
 unsigned long transparent_hugepage_flags __read_mostly =
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
 	(1<<TRANSPARENT_HUGEPAGE_FLAG)|
@@ -71,6 +75,87 @@ static struct shrinker deferred_split_shrinker;
 static atomic_t huge_zero_refcount;
 struct page *huge_zero_page __read_mostly;
 unsigned long huge_zero_pfn __read_mostly = ~0UL;
+
+unsigned long __thp_vma_allowable_orders(struct vm_area_struct *vma,
+					 unsigned long vm_flags,
+					 unsigned long tva_flags,
+					 unsigned long orders)
+{
+	bool smaps = tva_flags & TVA_SMAPS;
+	bool in_pf = tva_flags & TVA_IN_PF;
+	bool enforce_sysfs = tva_flags & TVA_ENFORCE_SYSFS;
+
+	/* Check the intersection of requested and supported orders. */
+	orders &= vma_is_anonymous(vma) ?
+			THP_ORDERS_ALL_ANON : THP_ORDERS_ALL_FILE;
+
+	if (!orders)
+		return 0;
+
+	if (!vma->vm_mm)		/* vdso */
+		return 0;
+
+	if (vma_thp_disabled(vma, vm_flags))
+		return 0;
+
+	if (transparent_hugepage_flags & (1 << TRANSPARENT_HUGEPAGE_NEVER_DAX))
+		return 0;
+
+	/* khugepaged doesn't collapse DAX vma, but page fault is fine. */
+	if (vma_is_dax(vma))
+		return in_pf ? orders : 0;
+
+	/*
+	 * Special VMA and hugetlb VMA.
+	 * Must be checked after dax since some dax mappings may have
+	 * VM_MIXEDMAP set.
+	 */
+	if (!in_pf && !smaps && (vm_flags & VM_NO_KHUGEPAGED))
+		return 0;
+
+	/*
+	 * Check alignment for file vma and size for both file and anon vma by
+	 * filtering out the unsuitable orders.
+	 *
+	 * Skip the check for page fault. Huge fault does the check in fault
+	 * handlers.
+	 */
+	if (!in_pf) {
+		int order = highest_order(orders);
+		unsigned long addr;
+
+		while (orders) {
+			addr = vma->vm_end - (PAGE_SIZE << order);
+			if (thp_vma_suitable_order(vma, addr, order))
+				break;
+			order = next_order(&orders, order);
+		}
+
+		if (!orders)
+			return 0;
+	}
+
+	if (!vma_is_anonymous(vma)) {
+		if (enforce_sysfs &&
+		    (!hugepage_global_enabled() || (!(vm_flags & VM_HUGEPAGE) &&
+						    !hugepage_global_always())))
+			return 0;
+
+		if (((in_pf || smaps)) && vma->vm_ops && vma->vm_ops->huge_fault)
+			return orders;
+		if (((!in_pf || smaps)) && file_thp_enabled(vma))
+			return orders;
+		return 0;
+	}
+
+	if (vma_is_temporary_stack(vma))
+		return 0;
+
+	if (!vma->anon_vma)
+		return (smaps || in_pf) ? orders : 0;
+
+	return orders;
+}
 
 bool hugepage_vma_check(struct vm_area_struct *vma, unsigned long vm_flags,
 			bool smaps, bool in_pf, bool enforce_sysfs)
@@ -412,6 +497,182 @@ static const struct attribute_group hugepage_attr_group = {
 	.attrs = hugepage_attr,
 };
 
+DEFINE_PER_CPU(struct mthp_stat, mthp_stats) = {{{0}}};
+
+unsigned long sum_mthp_stat(int order, enum mthp_stat_item item)
+{
+	unsigned long sum = 0;
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct mthp_stat *this = &per_cpu(mthp_stats, cpu);
+
+		sum += this->stats[order][item];
+	}
+
+	return sum;
+}
+EXPORT_SYMBOL_GPL(sum_mthp_stat);
+
+static void hugepage_exit_sysfs(struct kobject *hugepage_kobj);
+static void thpsize_release(struct kobject *kobj);
+static DEFINE_SPINLOCK(huge_anon_orders_lock);
+static LIST_HEAD(thpsize_list);
+
+struct thpsize {
+	struct kobject kobj;
+	struct list_head node;
+	int order;
+};
+
+#define to_thpsize(kobj) container_of(kobj, struct thpsize, kobj)
+
+static ssize_t thpsize_enabled_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	int order = to_thpsize(kobj)->order;
+	const char *output;
+
+	if (test_bit(order, &huge_anon_orders_always))
+		output = "[always] inherit madvise never";
+	else if (test_bit(order, &huge_anon_orders_inherit))
+		output = "always [inherit] madvise never";
+	else if (test_bit(order, &huge_anon_orders_madvise))
+		output = "always inherit [madvise] never";
+	else
+		output = "always inherit madvise [never]";
+
+	return sysfs_emit(buf, "%s\n", output);
+}
+
+static ssize_t thpsize_enabled_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int order = to_thpsize(kobj)->order;
+	ssize_t ret = count;
+
+	if (sysfs_streq(buf, "always")) {
+		spin_lock(&huge_anon_orders_lock);
+		clear_bit(order, &huge_anon_orders_inherit);
+		clear_bit(order, &huge_anon_orders_madvise);
+		set_bit(order, &huge_anon_orders_always);
+		spin_unlock(&huge_anon_orders_lock);
+	} else if (sysfs_streq(buf, "inherit")) {
+		spin_lock(&huge_anon_orders_lock);
+		clear_bit(order, &huge_anon_orders_always);
+		clear_bit(order, &huge_anon_orders_madvise);
+		set_bit(order, &huge_anon_orders_inherit);
+		spin_unlock(&huge_anon_orders_lock);
+	} else if (sysfs_streq(buf, "madvise")) {
+		spin_lock(&huge_anon_orders_lock);
+		clear_bit(order, &huge_anon_orders_always);
+		clear_bit(order, &huge_anon_orders_inherit);
+		set_bit(order, &huge_anon_orders_madvise);
+		spin_unlock(&huge_anon_orders_lock);
+	} else if (sysfs_streq(buf, "never")) {
+		spin_lock(&huge_anon_orders_lock);
+		clear_bit(order, &huge_anon_orders_always);
+		clear_bit(order, &huge_anon_orders_inherit);
+		clear_bit(order, &huge_anon_orders_madvise);
+		spin_unlock(&huge_anon_orders_lock);
+	} else
+		ret = -EINVAL;
+
+	return ret;
+}
+
+static struct kobj_attribute thpsize_enabled_attr =
+	__ATTR(enabled, 0644, thpsize_enabled_show, thpsize_enabled_store);
+
+static struct attribute *thpsize_attrs[] = {
+	&thpsize_enabled_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group thpsize_attr_group = {
+	.attrs = thpsize_attrs,
+};
+
+static const struct kobj_type thpsize_ktype = {
+	.release = &thpsize_release,
+	.sysfs_ops = &kobj_sysfs_ops,
+};
+
+#define DEFINE_MTHP_STAT_ATTR(_name, _index)				\
+static ssize_t _name##_show(struct kobject *kobj,			\
+			struct kobj_attribute *attr, char *buf)		\
+{									\
+	int order = to_thpsize(kobj)->order;				\
+									\
+	return sysfs_emit(buf, "%lu\n", sum_mthp_stat(order, _index));	\
+}									\
+static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
+
+DEFINE_MTHP_STAT_ATTR(anon_fault_alloc, MTHP_STAT_ANON_FAULT_ALLOC);
+DEFINE_MTHP_STAT_ATTR(anon_fault_fallback, MTHP_STAT_ANON_FAULT_FALLBACK);
+DEFINE_MTHP_STAT_ATTR(anon_fault_fallback_charge, MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE);
+DEFINE_MTHP_STAT_ATTR(swpout, MTHP_STAT_SWPOUT);
+DEFINE_MTHP_STAT_ATTR(swpout_fallback, MTHP_STAT_SWPOUT_FALLBACK);
+DEFINE_MTHP_STAT_ATTR(split, MTHP_STAT_SPLIT);
+DEFINE_MTHP_STAT_ATTR(split_failed, MTHP_STAT_SPLIT_FAILED);
+DEFINE_MTHP_STAT_ATTR(split_deferred, MTHP_STAT_SPLIT_DEFERRED);
+
+static struct attribute *stats_attrs[] = {
+	&anon_fault_alloc_attr.attr,
+	&anon_fault_fallback_attr.attr,
+	&anon_fault_fallback_charge_attr.attr,
+	&swpout_attr.attr,
+	&swpout_fallback_attr.attr,
+	&split_attr.attr,
+	&split_failed_attr.attr,
+	&split_deferred_attr.attr,
+	NULL,
+};
+
+static struct attribute_group stats_attr_group = {
+	.name = "stats",
+	.attrs = stats_attrs,
+};
+
+static struct thpsize *thpsize_create(int order, struct kobject *parent)
+{
+	unsigned long size = (PAGE_SIZE << order) / SZ_1K;
+	struct thpsize *thpsize;
+	int ret;
+
+	thpsize = kzalloc(sizeof(*thpsize), GFP_KERNEL);
+	if (!thpsize)
+		return ERR_PTR(-ENOMEM);
+
+	ret = kobject_init_and_add(&thpsize->kobj, &thpsize_ktype, parent,
+				   "hugepages-%lukB", size);
+	if (ret) {
+		kfree(thpsize);
+		return ERR_PTR(ret);
+	}
+
+	ret = sysfs_create_group(&thpsize->kobj, &thpsize_attr_group);
+	if (ret) {
+		kobject_put(&thpsize->kobj);
+		return ERR_PTR(ret);
+	}
+
+	ret = sysfs_create_group(&thpsize->kobj, &stats_attr_group);
+	if (ret) {
+		kobject_put(&thpsize->kobj);
+		return ERR_PTR(ret);
+	}
+
+	thpsize->order = order;
+	return thpsize;
+}
+
+static void thpsize_release(struct kobject *kobj)
+{
+	kfree(to_thpsize(kobj));
+}
+
 static int __init hugepage_init_sysfs(struct kobject **hugepage_kobj)
 {
 	int err;
@@ -428,13 +689,36 @@ static int __init hugepage_init_sysfs(struct kobject **hugepage_kobj)
 		goto delete_obj;
 	}
 
+	struct thpsize *thpsize;
+	unsigned long orders;
+	int order;
+
+	huge_anon_orders_inherit = BIT(PMD_ORDER);
+
 	err = sysfs_create_group(*hugepage_kobj, &khugepaged_attr_group);
 	if (err) {
 		pr_err("failed to register transparent hugepage group\n");
 		goto remove_hp_group;
 	}
 
+	orders = THP_ORDERS_ALL_ANON;
+	order = highest_order(orders);
+	while (orders) {
+		thpsize = thpsize_create(order, *hugepage_kobj);
+		if (IS_ERR(thpsize)) {
+			pr_err("failed to create thpsize for order %d\n", order);
+			err = PTR_ERR(thpsize);
+			goto remove_all;
+		}
+		list_add(&thpsize->node, &thpsize_list);
+		order = next_order(&orders, order);
+	}
+
 	return 0;
+
+remove_all:
+	hugepage_exit_sysfs(*hugepage_kobj);
+	return err;
 
 remove_hp_group:
 	sysfs_remove_group(*hugepage_kobj, &hugepage_attr_group);
@@ -445,6 +729,13 @@ delete_obj:
 
 static void __init hugepage_exit_sysfs(struct kobject *hugepage_kobj)
 {
+	struct thpsize *thpsize, *tmp;
+
+	list_for_each_entry_safe(thpsize, tmp, &thpsize_list, node) {
+		list_del(&thpsize->node);
+		kobject_put(&thpsize->kobj);
+	}
+
 	sysfs_remove_group(hugepage_kobj, &khugepaged_attr_group);
 	sysfs_remove_group(hugepage_kobj, &hugepage_attr_group);
 	kobject_put(hugepage_kobj);

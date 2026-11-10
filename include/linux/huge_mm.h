@@ -104,6 +104,28 @@ extern struct kobj_attribute shmem_enabled_attr;
 
 #define HPAGE_PMD_ORDER (HPAGE_PMD_SHIFT-PAGE_SHIFT)
 #define HPAGE_PMD_NR (1<<HPAGE_PMD_ORDER)
+#ifndef PMD_ORDER
+#define PMD_ORDER HPAGE_PMD_ORDER
+#endif
+#ifndef PUD_ORDER
+#define PUD_ORDER (HPAGE_PUD_SHIFT-PAGE_SHIFT)
+#endif
+
+/*
+ * Mask of all large folio orders supported for anonymous THP; all orders up to
+ * and including PMD_ORDER, except order-0 (which is not "huge") and order-1
+ * (which is a limitation of the THP implementation).
+ */
+#define THP_ORDERS_ALL_ANON	((BIT(PMD_ORDER + 1) - 1) & ~(BIT(0) | BIT(1)))
+#define THP_ORDERS_ALL_FILE	(BIT(PMD_ORDER) | BIT(PUD_ORDER))
+#define THP_ORDERS_ALL		(THP_ORDERS_ALL_ANON | THP_ORDERS_ALL_FILE)
+
+#define TVA_SMAPS		(1 << 0)	/* Will be used for procfs */
+#define TVA_IN_PF		(1 << 1)	/* Page fault handler */
+#define TVA_ENFORCE_SYSFS	(1 << 2)	/* Obey sysfs configuration */
+
+#define thp_vma_allowable_order(vma, vm_flags, tva_flags, order) \
+	(!!thp_vma_allowable_orders(vma, vm_flags, tva_flags, BIT(order)))
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 #define HPAGE_PMD_SHIFT PMD_SHIFT
@@ -115,6 +137,156 @@ extern struct kobj_attribute shmem_enabled_attr;
 #define HPAGE_PUD_MASK	(~(HPAGE_PUD_SIZE - 1))
 
 extern unsigned long transparent_hugepage_flags;
+extern unsigned long huge_anon_orders_always;
+extern unsigned long huge_anon_orders_madvise;
+extern unsigned long huge_anon_orders_inherit;
+
+static inline bool hugepage_global_enabled(void)
+{
+	return transparent_hugepage_flags &
+			((1<<TRANSPARENT_HUGEPAGE_FLAG) |
+			(1<<TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG));
+}
+
+static inline bool hugepage_global_always(void)
+{
+	return transparent_hugepage_flags &
+			(1<<TRANSPARENT_HUGEPAGE_FLAG);
+}
+
+static inline int highest_order(unsigned long orders)
+{
+	return fls_long(orders) - 1;
+}
+
+static inline int next_order(unsigned long *orders, int prev)
+{
+	*orders &= ~BIT(prev);
+	return highest_order(*orders);
+}
+
+static inline bool thp_vma_suitable_order(struct vm_area_struct *vma,
+		unsigned long addr, int order)
+{
+	unsigned long hpage_size = PAGE_SIZE << order;
+	unsigned long haddr;
+
+	/* Don't have to check pgoff for anonymous vma */
+	if (!vma_is_anonymous(vma)) {
+		if (!IS_ALIGNED((vma->vm_start >> PAGE_SHIFT) - vma->vm_pgoff,
+				hpage_size >> PAGE_SHIFT))
+			return false;
+	}
+
+	haddr = ALIGN_DOWN(addr, hpage_size);
+
+	if (haddr < vma->vm_start || haddr + hpage_size > vma->vm_end)
+		return false;
+	return true;
+}
+
+static inline unsigned long thp_vma_suitable_orders(struct vm_area_struct *vma,
+		unsigned long addr, unsigned long orders)
+{
+	int order = highest_order(orders);
+
+	while (orders) {
+		if (thp_vma_suitable_order(vma, addr, order))
+			break;
+		order = next_order(&orders, order);
+	}
+
+	return orders;
+}
+
+unsigned long __thp_vma_allowable_orders(struct vm_area_struct *vma,
+					 unsigned long vm_flags,
+					 unsigned long tva_flags,
+					 unsigned long orders);
+
+static inline
+unsigned long thp_vma_allowable_orders(struct vm_area_struct *vma,
+				       unsigned long vm_flags,
+				       unsigned long tva_flags,
+				       unsigned long orders)
+{
+	if ((tva_flags & TVA_ENFORCE_SYSFS) && vma_is_anonymous(vma)) {
+		unsigned long mask = READ_ONCE(huge_anon_orders_always);
+
+		if (vm_flags & VM_HUGEPAGE)
+			mask |= READ_ONCE(huge_anon_orders_madvise);
+		if (hugepage_global_always() ||
+		    ((vm_flags & VM_HUGEPAGE) && hugepage_global_enabled()))
+			mask |= READ_ONCE(huge_anon_orders_inherit);
+
+		orders &= mask;
+		if (!orders)
+			return 0;
+	}
+
+	return __thp_vma_allowable_orders(vma, vm_flags, tva_flags, orders);
+}
+
+static inline bool vma_thp_disabled(struct vm_area_struct *vma,
+		unsigned long vm_flags)
+{
+	return (vm_flags & VM_NOHUGEPAGE) ||
+	       test_bit(MMF_DISABLE_THP, &vma->vm_mm->flags);
+}
+
+static inline bool thp_disabled_by_hw(void)
+{
+	return transparent_hugepage_flags & (1 << TRANSPARENT_HUGEPAGE_NEVER_DAX);
+}
+
+gfp_t vma_thp_gfp_mask(struct vm_area_struct *vma);
+
+enum mthp_stat_item {
+	MTHP_STAT_ANON_FAULT_ALLOC,
+	MTHP_STAT_ANON_FAULT_FALLBACK,
+	MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE,
+	MTHP_STAT_SWPOUT,
+	MTHP_STAT_SWPOUT_FALLBACK,
+	MTHP_STAT_SPLIT,
+	MTHP_STAT_SPLIT_FAILED,
+	MTHP_STAT_SPLIT_DEFERRED,
+	__MTHP_STAT_COUNT
+};
+
+struct mthp_stat {
+	unsigned long stats[PMD_ORDER + 1][__MTHP_STAT_COUNT];
+};
+
+#ifdef CONFIG_SYSFS
+DECLARE_PER_CPU(struct mthp_stat, mthp_stats);
+
+static inline void mod_mthp_stat(int order, enum mthp_stat_item item, int delta)
+{
+	if (order <= 0 || order > PMD_ORDER)
+		return;
+
+	this_cpu_add(mthp_stats.stats[order][item], delta);
+}
+
+static inline void count_mthp_stat(int order, enum mthp_stat_item item)
+{
+	mod_mthp_stat(order, item, 1);
+}
+
+unsigned long sum_mthp_stat(int order, enum mthp_stat_item item);
+#else
+static inline void mod_mthp_stat(int order, enum mthp_stat_item item, int delta)
+{
+}
+
+static inline void count_mthp_stat(int order, enum mthp_stat_item item)
+{
+}
+static inline unsigned long sum_mthp_stat(int order, enum mthp_stat_item item)
+{
+	return 0;
+}
+#endif
 
 #define hugepage_flags_enabled()					       \
 	(transparent_hugepage_flags &				       \
@@ -303,6 +475,20 @@ static inline struct list_head *page_deferred_list(struct page *page)
 }
 
 #else /* CONFIG_TRANSPARENT_HUGEPAGE */
+static inline unsigned long
+thp_vma_allowable_orders(struct vm_area_struct *vma,
+			 unsigned long vm_flags,
+			 unsigned long tva_flags,
+			 unsigned long orders)
+{
+	return 0;
+}
+static inline unsigned long
+thp_vma_suitable_orders(struct vm_area_struct *vma,
+			unsigned long addr, unsigned long orders)
+{
+	return 0;
+}
 #define HPAGE_PMD_SHIFT ({ BUILD_BUG(); 0; })
 #define HPAGE_PMD_MASK ({ BUILD_BUG(); 0; })
 #define HPAGE_PMD_SIZE ({ BUILD_BUG(); 0; })
