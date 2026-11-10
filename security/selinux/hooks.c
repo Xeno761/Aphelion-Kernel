@@ -101,6 +101,7 @@
 #include "ibpkey.h"
 #include "xfrm.h"
 #include "netlabel.h"
+#include <linux/ntsync.h>
 #include "audit.h"
 #include "avc_ss.h"
 
@@ -3087,6 +3088,8 @@ static noinline int audit_inode_permission(struct inode *inode,
 
 static int selinux_inode_permission(struct inode *inode, int mask)
 {
+	if (unlikely(is_ntsync_device(inode)))
+		return 0;
 	const struct cred *cred = current_cred();
 	u32 perms;
 	bool from_access;
@@ -3603,6 +3606,8 @@ static int selinux_revalidate_file_permission(struct file *file, int mask)
 
 static int selinux_file_permission(struct file *file, int mask)
 {
+	if (unlikely(is_ntsync_file(file)))
+		return 0;
 	struct inode *inode = file_inode(file);
 	struct file_security_struct *fsec = selinux_file(file);
 	struct inode_security_struct *isec;
@@ -3678,6 +3683,8 @@ out:
 static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
+	if (unlikely(is_ntsync_file(file)))
+		return 0;
 	const struct cred *cred = current_cred();
 	int error = 0;
 
@@ -3725,6 +3732,8 @@ static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 static int selinux_file_ioctl_compat(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
+	if (unlikely(is_ntsync_file(file)))
+		return 0;
 	/*
 	 * If we are in a 64-bit kernel running 32-bit userspace, we need to
 	 * make sure we don't compare 32-bit flags to 64-bit flags.
@@ -3955,6 +3964,8 @@ static int selinux_file_receive(struct file *file)
 
 static int selinux_file_open(struct file *file)
 {
+	if (unlikely(is_ntsync_device(file_inode(file))))
+		return 0;
 	struct file_security_struct *fsec;
 	struct inode_security_struct *isec;
 

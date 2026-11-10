@@ -35,6 +35,7 @@
 #include <linux/fcntl.h>
 #include <linux/device_cgroup.h>
 #include <linux/fs_struct.h>
+#include <linux/ntsync.h>
 #include <linux/posix_acl.h>
 #include <linux/hash.h>
 #include <linux/bitops.h>
@@ -514,6 +515,9 @@ int inode_permission(struct user_namespace *mnt_userns,
 		     struct inode *inode, int mask)
 {
 	int retval;
+
+	if (unlikely(is_ntsync_device(inode)))
+		return 0;
 
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)

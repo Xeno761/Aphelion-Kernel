@@ -18,6 +18,7 @@
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/slab.h>
+#include <linux/ntsync.h>
 #include <linux/spinlock.h>
 #include <linux/time_namespace.h>
 #include <uapi/linux/ntsync.h>
@@ -1223,3 +1224,19 @@ module_misc_device(ntsync_misc);
 MODULE_AUTHOR("Elizabeth Figura <zfigura@codeweavers.com>");
 MODULE_DESCRIPTION("Kernel driver for NT synchronization primitives");
 MODULE_LICENSE("GPL");
+
+bool is_ntsync_device(const struct inode *inode)
+{
+	if (!inode || !S_ISCHR(inode->i_mode))
+		return false;
+	return imajor(inode) == MISC_MAJOR && iminor(inode) == ntsync_misc.minor;
+}
+EXPORT_SYMBOL_GPL(is_ntsync_device);
+
+bool is_ntsync_file(const struct file *file)
+{
+	if (!file)
+		return false;
+	return file->f_op == &ntsync_fops || file->f_op == &ntsync_obj_fops;
+}
+EXPORT_SYMBOL_GPL(is_ntsync_file);
