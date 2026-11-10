@@ -523,4 +523,14 @@ source "drivers/misc/habanalabs/Kconfig"
 source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/mchp_pci1xxxx/Kconfig"
+config NTSYNC
+	tristate "NT synchronization primitive driver"
+	default y
+	help
+	  This driver provides support for NT synchronization primitives
+	  emulated in the kernel, improving performance of Windows applications
+	  and games running under Wine/Proton and Android emulators.
+
+	  If unsure, say Y.
+
 endmenu
