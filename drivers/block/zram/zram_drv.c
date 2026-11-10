@@ -42,6 +42,9 @@ static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
 static const char *default_compressor = CONFIG_ZRAM_DEF_COMP;
+#ifdef CONFIG_ZRAM_MULTI_COMP
+static const char *default_recompressor = "zstd";
+#endif
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -1041,7 +1044,11 @@ static ssize_t max_comp_streams_store(struct device *dev,
 static void comp_algorithm_set(struct zram *zram, u32 prio, const char *alg)
 {
 	/* Do not free statically defined compression algorithms */
-	if (zram->comp_algs[prio] != default_compressor)
+	if (zram->comp_algs[prio] != default_compressor
+#ifdef CONFIG_ZRAM_MULTI_COMP
+	    && zram->comp_algs[prio] != default_recompressor
+#endif
+	   )
 		kfree(zram->comp_algs[prio]);
 
 	zram->comp_algs[prio] = alg;
@@ -1082,6 +1089,28 @@ static int __comp_algorithm_store(struct zram *zram, u32 prio, const char *buf)
 
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
+#ifdef CONFIG_ZRAM_MULTI_COMP
+		if (prio >= ZRAM_SECONDARY_COMP) {
+			struct zcomp *comp;
+
+			comp = zcomp_create(compressor);
+			if (IS_ERR(comp)) {
+				up_write(&zram->init_lock);
+				kfree(compressor);
+				return PTR_ERR(comp);
+			}
+
+			if (zram->comps[prio])
+				zcomp_destroy(zram->comps[prio]);
+			else
+				zram->num_active_comps++;
+
+			zram->comps[prio] = comp;
+			comp_algorithm_set(zram, prio, compressor);
+			up_write(&zram->init_lock);
+			return 0;
+		}
+#endif
 		up_write(&zram->init_lock);
 		kfree(compressor);
 		pr_info("Can't change algorithm for initialized device\n");
@@ -2185,6 +2214,9 @@ static void zram_reset_device(struct zram *zram)
 	reset_bdev(zram);
 
 	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
+#ifdef CONFIG_ZRAM_MULTI_COMP
+	comp_algorithm_set(zram, ZRAM_SECONDARY_COMP, default_recompressor);
+#endif
 	up_write(&zram->init_lock);
 }
 
@@ -2432,6 +2464,9 @@ static int zram_add(void)
 		goto out_cleanup_disk;
 
 	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
+#ifdef CONFIG_ZRAM_MULTI_COMP
+	comp_algorithm_set(zram, ZRAM_SECONDARY_COMP, default_recompressor);
+#endif
 
 	zram_debugfs_register(zram);
 	pr_info("Added device: %s\n", zram->disk->disk_name);
