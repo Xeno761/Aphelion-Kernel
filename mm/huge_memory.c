@@ -55,9 +55,9 @@
  * Defrag is invoked by khugepaged hugepage allocations and by page faults
  * for all hugepage allocations.
  */
-unsigned long huge_anon_orders_always __read_mostly = (1 << 2) | (1 << 3) | (1 << 4);
+unsigned long huge_anon_orders_always __read_mostly;
 unsigned long huge_anon_orders_madvise __read_mostly;
-unsigned long huge_anon_orders_inherit __read_mostly;
+unsigned long huge_anon_orders_inherit __read_mostly = 1 << 4; /* 64KB contpte inherit for games/ART heap */
 
 unsigned long transparent_hugepage_flags __read_mostly =
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS

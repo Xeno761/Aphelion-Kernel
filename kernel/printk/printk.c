@@ -2286,7 +2286,7 @@ int vprintk_store(int facility, int level,
 	u64 ts_nsec;
 
 	/* Suppress noisy MediaTek Wi-Fi link quality debug spam */
-	if (fmt && strstr(fmt, "Link Quality: Tx"))
+	if (fmt && strstr(fmt, "[wlan]"))
 		return 0;
 
 	if (!printk_enter_irqsave(recursion_ptr, irqflags))
