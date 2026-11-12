@@ -1,35 +1,31 @@
 # Aphelion — known-unresolved vendor module symbols.
 #
-# The pre-flight audit cross-checks every undefined symbol in every extracted
-# vendor module against this kernel's exports (vmlinux + the vendor modules we
-# have). Anything listed here is EXPECTED to be unresolved against that set;
-# anything new is fatal.
+# The pre-flight audit cross-checks every undefined symbol in every vendor
+# module it can see against this kernel's exports (vmlinux + the other vendor
+# modules). Anything listed here is EXPECTED to be unresolved; anything new is
+# fatal.
 #
-# None of these is caused by a config choice in this tree: they were all
-# unresolved before SLUB_DEBUG / WQ_WATCHDOG / PM_DEBUG were disabled, and none
-# of them relates to those options.
+# The audited set now covers all three module locations on the device:
+#   rev/vb/rd/lib/modules       223  from vendor_boot ramdisk
+#   rev/dlkm/lib/modules        310  from vendor_dlkm
+#   rev/system_dlkm/lib/modules  60  GKI set, pulled from the running device
 #
-#   1. Provided at runtime by GKI modules living in the device's system_dlkm
-#      partition (bluetooth.ko, rfkill.ko, ...). That partition was never
-#      extracted here: images/ contains boot, vendor_boot and vendor_dlkm but
-#      no system_dlkm, so the audit cannot see those providers.
+# Pulling system_dlkm removed the 14 false gaps that used to sit here: arc4_*,
+# hci_* and rfkill_* resolve from bluetooth.ko / rfkill.ko in that partition.
+# Nothing below is a GKI provider any more.
 #
-#      Verified on the device: `rfkill` and `bluetooth` are loaded modules with
-#      cfg80211, nfc, bt_drv_6897, hci_uart, btsdio among their users. These
-#      symbols DO resolve at runtime, which is also why the matching kernel
-#      options must stay =m: building rfkill/BT into vmlinux would collide with
-#      the GKI module and stop it loading.
+# None of the remaining 52 is caused by a config choice in this tree: the code
+# is not exported anywhere in this source tree, so no defconfig edit can create
+# or remove them. They belong to Oplus and Lenovo components whose provider
+# modules are not in any image we have.
 #
-#      arc4_crypt, arc4_setkey, rfkill_*, hci_*
-#
-#   2. Oplus scheduler extensions (scx/hmbird) whose exporting module is not in
-#      either extracted image, and which this source tree does not export:
+#   1. Oplus scheduler extensions (scx / hmbird):
 #
 #      __scx_ops_enabled, scx_*, task_is_scx, hmbird_dir, iso_masks,
 #      __tracepoint_android_*_scx_*, __tracepoint_android_*_hmbird_*,
 #      __traceiter_android_vh_scx_update_task_scale_time
 #
-#   3. Oplus display / touch / sensor bus hooks, same situation:
+#   2. Oplus display / touch / sensor bus hooks:
 #
 #      register_lcdinfo_notifier, unregister_lcdinfo_notifier,
 #      touchpanel_event_*, tp_judge_ic_match, tp_util_get_vendor,
@@ -37,7 +33,7 @@
 #      oplus_mrdump_mini_add_misc, oplus_read_mm_config,
 #      get_support_sensor_list, get_pogo_keyboard_operations
 #
-#   4. Lenovo / MTK bootloader and helpers from source this tree lacks:
+#   3. Lenovo / MTK bootloader and helpers from source this tree lacks:
 #
 #      get_boot_mode, get_eng_version, get_PCB_Version, verified_bootstate,
 #      is_confidential, register_devinfo, request_firmware_select,
@@ -49,8 +45,8 @@
 #      __tracepoint_android_vh_throttle_direct_reclaim_bypass,
 #      __tracepoint_android_vh_tick_nohz_idle_stop_tick
 #
-# Entries 2-4 belong to modules that do not load on this device, which is why
-# the kernel boots without them. Prune entries as they get fixed.
+# These belong to modules that do not load on this device, which is why the
+# kernel boots without them. Prune entries as they get fixed.
 
 __scx_ops_enabled
 __traceiter_android_vh_scx_update_task_scale_time
@@ -66,8 +62,6 @@ __tracepoint_android_vh_scx_select_cpu_dfl
 __tracepoint_android_vh_scx_update_task_scale_time
 __tracepoint_android_vh_throttle_direct_reclaim_bypass
 __tracepoint_android_vh_tick_nohz_idle_stop_tick
-arc4_crypt
-arc4_setkey
 ext_module_loaded
 fb_kevent_send_to_user
 get_PCB_Version
@@ -80,11 +74,6 @@ get_next_memcg_break
 get_pogo_keyboard_operations
 get_slabinfo
 get_support_sensor_list
-hci_alloc_dev_priv
-hci_free_dev
-hci_recv_frame
-hci_register_dev
-hci_unregister_dev
 hmbird_dir
 is_confidential
 iso_masks
@@ -98,13 +87,6 @@ osvelte_kallsyms_lookup_name
 register_devinfo
 register_lcdinfo_notifier
 request_firmware_select
-rfkill_alloc
-rfkill_blocked
-rfkill_destroy
-rfkill_register
-rfkill_resume_polling
-rfkill_set_hw_state_reason
-rfkill_unregister
 scx_get_md_info
 scx_irq_work_lastq_ws
 scx_sched_rq_stats

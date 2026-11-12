@@ -21,6 +21,10 @@ DEFAULT_MODULE_DIRS = [
     "/root/module_inspect/vendor_ramdisk/lib/modules",
     "/mnt/c/Users/Namit/Downloads/Aphelion-Kernel/rev/dlkm/lib/modules",
     "/mnt/c/Users/Namit/Downloads/Aphelion-Kernel/rev/vb/rd/lib/modules",
+    # GKI modules from the device's system_dlkm partition, pulled with adb.
+    # They are not inside any image in images/, so without this directory the
+    # audit cannot see the providers of rfkill_*, hci_* and arc4_*.
+    "/mnt/c/Users/Namit/Downloads/Aphelion-Kernel/rev/system_dlkm/lib/modules",
 ]
 
 TOOLCHAIN_NM = "/root/toolchains/clang-r487747c/bin/llvm-nm"
