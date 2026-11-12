@@ -1,7 +1,7 @@
 # Aphelion Kernel v1.5.0 — Major Performance, Memory & Touch Milestone
 
 **Target Platform:** Lenovo Idea Tab Pro (TB373FU / MediaTek Dimensity 8300 / MT6897)  
-**Base:** Google Android Common Kernel (ACK) Linux 6.1.183 LTS (ndroid14-6.1-lts)  
+**Base:** Google Android Common Kernel (ACK) Linux 6.1.183 LTS (android14-6.1-lts)  
 **Toolchain:** Google AOSP Official Pinned clang-r487747c (LLVM 17.0.2 + PGO + BOLT + LTO)  
 **KMI Freeze:** 100% Bit-for-Bit Frozen (struct task_struct, struct file, struct mm_struct) — Complete compatibility with all 475 prebuilt stock vendor modules.
 
