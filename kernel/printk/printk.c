@@ -20,6 +20,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
+#include <linux/jump_label.h>
 #include <linux/mm.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -2266,6 +2267,99 @@ static u16 printk_sprint(char *text, u16 size, int facility,
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(console);
 
+/*
+ * The MediaTek wlan driver (wlan_drv_gen4m_6897) logs several multi-line
+ * informational packets every second -- measured at ~68 of ~74 kernel messages
+ * per second on this platform -- which dominates printk CPU time and rolls real
+ * history out of the ring buffer.
+ *
+ * Only these known high-rate prefixes are dropped, so genuine errors from the
+ * same driver (firmware faults, scan/disconnect failures, firmware download
+ * errors) still reach the log. The static key keeps the cost on the printk hot
+ * path to one predicted branch, and lets the filter be disabled at runtime via
+ * /proc/sys/kernel/mtk_wlan_spam_filter to see raw driver output again.
+ */
+DEFINE_STATIC_KEY_TRUE(mtk_wlan_spam_filter);
+
+/*
+ * The first byte of a printk format may be KERN_SOH followed by a level digit,
+ * e.g. "\0016[wlan][%u]%s:(SW4 INFO) ...". Skip that so both prefixed and bare
+ * forms can be matched regardless of whether the caller set a level.
+ */
+static __always_inline const char *mtk_wlan_skip_level(const char *fmt)
+{
+	if (*fmt == KERN_SOH_ASCII) {
+		fmt++;
+		if (*fmt >= '0' && *fmt <= '7')
+			fmt++;
+	}
+
+	return fmt;
+}
+
+/*
+ * Severity tags emitted by the four high-rate informational paths. Matched by
+ * tag rather than by a generic "INFO)" so unrelated INFO categories and every
+ * WARN/ERROR line still reach the log.
+ */
+static const char *const mtk_wlan_spam_sev[] = {
+	"(INIT INFO)",	/* halSetFWOwn */
+	"(SW4 INFO)",	/* kalPerMonUpdate */
+	"(TX INFO)",	/* asicConnac2xFillCmdTxdInfo */
+	"(HAL INFO)",	/* halDumpHifStats */
+};
+
+/*
+ * Bare form: the tag itself is the format string. Never drop a line that
+ * reports a fault, so a bare (INIT WARN) / (REQ WARN) from these paths still
+ * reaches the log; otherwise drop the known informational tags.
+ */
+static __always_inline bool mtk_wlan_bare_spam(const char *msg)
+{
+	if (strstr(msg, "WARN") || strstr(msg, "ERR"))
+		return false;
+
+	switch (msg[0]) {
+	case 'h':
+		return !strncmp(msg, "halSetFWOwn", 11) ||
+		       !strncmp(msg, "halDumpHifStats", 15);
+	case 'k':
+		return !strncmp(msg, "kalPerMonUpdate", 15);
+	case 'a':
+		return !strncmp(msg, "asicConnac2xFillCmdTxdInfo", 26);
+	default:
+		return false;
+	}
+}
+
+static __always_inline bool mtk_wlan_spam(const char *fmt)
+{
+	const char *msg;
+	int i;
+
+	if (!static_branch_likely(&mtk_wlan_spam_filter))
+		return false;
+
+	msg = mtk_wlan_skip_level(fmt);
+
+	/*
+	 * Prefixed form: "[wlan][<pid>]<tag>:(SW4 INFO) ...". The tag arrives as a
+	 * %s argument, so only the prefix and the severity are visible here. Drop
+	 * informational lines and keep WARN/ERR so genuine faults still print.
+	 */
+	if (msg[0] == '[' && !strncmp(msg, "[wlan]", 6)) {
+		for (i = 0; i < ARRAY_SIZE(mtk_wlan_spam_sev); i++) {
+			if (strstr(msg, mtk_wlan_spam_sev[i]))
+				return true;
+		}
+
+		return false;
+	}
+
+	return mtk_wlan_bare_spam(msg);
+}
+
+
 __printf(4, 0)
 int vprintk_store(int facility, int level,
 		  const struct dev_printk_info *dev_info,
@@ -2285,8 +2379,7 @@ int vprintk_store(int facility, int level,
 	int ret = 0;
 	u64 ts_nsec;
 
-	/* Suppress noisy MediaTek Wi-Fi link quality debug spam */
-	if (fmt && strstr(fmt, "[wlan]"))
+	if (fmt && mtk_wlan_spam(fmt))
 		return 0;
 
 	if (!printk_enter_irqsave(recursion_ptr, irqflags))

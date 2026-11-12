@@ -14,6 +14,10 @@ int devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write,
 
 #ifdef CONFIG_PRINTK
 
+/* Gated MediaTek wlan informational-log filter (see vprintk_store). */
+#include <linux/jump_label.h>
+DECLARE_STATIC_KEY_TRUE(mtk_wlan_spam_filter);
+
 /* Flags for a single printk record. */
 enum printk_info_flags {
 	LOG_NEWLINE	= 2,	/* text ended with a newline */

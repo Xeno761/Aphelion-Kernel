@@ -8,6 +8,7 @@
 #include <linux/capability.h>
 #include <linux/ratelimit.h>
 #include "internal.h"
+#include <linux/jump_label.h>
 
 static const int ten_thousand = 10000;
 
@@ -20,6 +21,27 @@ static int proc_dointvec_minmax_sysadmin(struct ctl_table *table, int write,
 	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 }
 
+#ifdef CONFIG_PRINTK
+static int mtk_wlan_spam_filter_handler(struct ctl_table *table, int write,
+					void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int val = static_key_enabled(&mtk_wlan_spam_filter.key);
+	int ret;
+
+	table->data = &val;
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (ret || !write)
+		return ret;
+
+	if (val)
+		static_branch_enable(&mtk_wlan_spam_filter);
+	else
+		static_branch_disable(&mtk_wlan_spam_filter);
+
+	return 0;
+}
+#endif
+
 static struct ctl_table printk_sysctls[] = {
 	{
 		.procname	= "printk",
@@ -27,6 +49,15 @@ static struct ctl_table printk_sysctls[] = {
 		.maxlen		= 4*sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "mtk_wlan_spam_filter",
+		.data		= NULL,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= mtk_wlan_spam_filter_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
 	},
 	{
 		.procname	= "printk_ratelimit",
