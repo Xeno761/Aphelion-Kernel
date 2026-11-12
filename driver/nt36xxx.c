@@ -333,6 +333,8 @@ EXPORT_SYMBOL_GPL(hall_close_tp_poweroff);
 int nt36532_ts_gpio_active(void);
 int nt36532_ts_gpio_suspend(void);
 #endif
+
+static DEFINE_MUTEX(nvt_lifecycle_lock);
 //-chklst-98554,fangzhihua.wt,add,20240338,add pinctrl to cs,irq,int
 
 /*******************************************************
@@ -366,7 +368,7 @@ static void nvt_irq_enable(bool enable)
 #if WAKEUP_GESTURE
 static void nvt_irq_wake_disable(void)
 {
-	int ret;
+	int __maybe_unused ret;
 
 	if (!nvt_irq_wake_enabled)
 		return;
@@ -466,7 +468,7 @@ static bool nvt_begin_recovery_locked(enum nvt_recovery_reason reason)
 	nvt_diag.recoveries++;
 	nvt_diag.last_reason = reason;
 	nvt_diag.last_fault = now;
-	WRITE_ONCE(ts->fw_update_stat, 0);
+	WRITE_ONCE(ts->fw_update_stat, 1);
 	nvt_irq_enable(false);
 	nvt_release_contacts();
 	NVT_LOG("runtime recovery reason=%u, budget=%u/%u\n",
@@ -490,7 +492,7 @@ void nvt_fw_update_complete(int ret)
 	if (ret) {
 		nvt_diag.fw_failures++;
 		nvt_diag.last_fault = jiffies;
-		WRITE_ONCE(ts->fw_update_stat, 0);
+		WRITE_ONCE(ts->fw_update_stat, 1);
 		nvt_irq_enable(false);
 		nvt_release_contacts();
 #if BOOT_UPDATE_FIRMWARE
@@ -1788,6 +1790,10 @@ static int32_t nvt_ic_probe_locked(void)
 		goto out;
 	nvt_diag.fw_state_read = true;
 	nvt_diag.last_fw_state = buf[1];
+	if (buf[1] == RESET_STATE_INIT || buf[1] == RESET_STATE_REK) {
+		nvt_diag.last_health_ret = 0;
+		return 0;
+	}
 	ret = (buf[1] >= RESET_STATE_REK_FINISH && buf[1] <= RESET_STATE_MAX) ?
 		0 : -EAGAIN;
 out:
@@ -1839,9 +1845,11 @@ static void nvt_health_check_func(struct work_struct *work)
 		nvt_diag.last_fault = jiffies;
 		if (nvt_health_bad < 2)
 			nvt_health_bad++;
-#if BOOT_UPDATE_FIRMWARE
-		if (nvt_health_bad == 2 && nvt_begin_recovery_locked(NVT_RECOVERY_HEALTH))
-			nvt_queue_fw_update(0);
+#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
+		if (nvt_health_bad == 2) {
+			nvt_rek_schedule(100);
+			nvt_health_bad = 0;
+		}
 #endif
 	}
 out:
@@ -1908,7 +1916,7 @@ void nvt_read_fw_history(uint32_t fw_history_addr)
 	uint8_t i = 0;
 	uint8_t buf[65] = {0};
 	char str[128];
-	int ret;
+	int __maybe_unused ret;
 
 	if (fw_history_addr == 0)
 		return;
@@ -1979,7 +1987,7 @@ static bool nvt_handle_fw_fault(uint8_t *point_data)
 	unsigned long now = jiffies;
 	int i;
 #if NVT_TOUCH_WDT_RECOVERY
-	int ret;
+	int __maybe_unused ret;
 #endif
 
 	lockdep_assert_held(&ts->lock);
@@ -2008,19 +2016,14 @@ static bool nvt_handle_fw_fault(uint8_t *point_data)
 	nvt_diag.wdt_frames++;
 	nvt_diag.last_fault = now;
 #if NVT_TOUCH_WDT_RECOVERY
-	if (!nvt_fault_window(nvt_diag.wdt_samples, &nvt_diag.wdt_streak,
-			      NVT_WDT_CONFIRM, now) ||
-	    !nvt_begin_recovery_locked(NVT_RECOVERY_WDT))
-		return true;
-	/* Preserve the NT36532-specific FE reset/ACI sequence and history read. */
+	/* Safe non-destructive recovery: reset MCU to idle without killing IRQ or burning flash */
 	if (point_data[1] == 0xFE) {
 		nvt_sw_reset_idle();
 		nvt_clear_aci_error_flag();
 	}
-	nvt_read_fw_history_all();
-	ret = nvt_update_firmware(gpio_184 == 0 ?
-		BOOT_UPDATE_FIRMWARE_NAME_BOE : BOOT_UPDATE_FIRMWARE_NAME_TIANMA);
-	nvt_fw_update_complete(ret);
+#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
+	nvt_rek_schedule(100);
+#endif
 #endif
 	return true;
 }
@@ -2137,10 +2140,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	}
 #endif
 
-#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
-	/* A report waiting for ts->lock must also defer recalibration. */
-	nvt_rek_note_activity();
-#endif
 #if NVT_PM_WAIT_BUS_RESUME_COMPLETE
 	/* PM resume needs ts->lock; never wait for it while holding that lock. */
 	if (READ_ONCE(ts->dev_pm_suspend)) {
@@ -2162,7 +2161,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		goto XFER_ERROR;
 	}
 #endif
-	if (!ts->irq_enabled || (bTouchIsAwake && ts->fw_update_stat != 1)) {
+	if (!bTouchIsAwake || !ts->irq_enabled) {
 		nvt_diag.inactive_drops++;
 		goto XFER_ERROR;
 	}
@@ -2208,9 +2207,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
  * Firmware readiness is checked separately by the health worker.
  */
 	WRITE_ONCE(nvt_health_activity, 1);
-#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
-	nvt_rek_note_activity();
-#endif
 
 	if (nvt_handle_fw_fault(point_data))
 		goto XFER_ERROR;
@@ -2372,6 +2368,12 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	}
 #endif
 
+#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
+	/* Only a real contact defers recalibration: a controller that keeps
+	 * interrupting while reporting nothing must still be corrected. */
+	if (finger_cnt > 0 || (ts->pen_support && (pen_pressure > 0 || pen_distance > 0)))
+		nvt_rek_note_activity();
+#endif
 	input_sync(ts->input_dev);
 
 	nvt_diag.touch_frames++;
@@ -2537,7 +2539,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	} /* if (ts->pen_support) */
 
 XFER_ERROR:
-
+	if (!bTouchIsAwake || !ts->irq_enabled)
+		nvt_release_contacts();
 	mutex_unlock(&ts->lock);
 	return IRQ_HANDLED;
 }
@@ -2763,7 +2766,12 @@ static void nvt_restore_cmd_func(struct work_struct *work)
 	WRITE_ONCE(ts->fw_pen_state, 0);
 #endif
 #if NVT_TOUCH_EXT_PROC
-	nvt_rek_schedule(1000);
+	if (ts->probe_state == 1) {
+		ts->probe_state = 0;
+		nvt_rek_schedule(120000);
+	} else {
+		nvt_rek_schedule(2500);
+	}
 #endif
 	return;
 
@@ -2904,20 +2912,16 @@ static int nvt_cs_init_dts(struct nvt_ts_data *ts)
 
 	nt36532_rst_active = pinctrl_lookup_state(
 				nt36532_pinctrl, PINCTRL_STATE_RST_ACTIVE);
-	if (IS_ERR_OR_NULL(nt36532_pinctrl)) {
-		ret = PTR_ERR(nt36532_pinctrl);
-		NVT_ERR("Failed to get pinctrl state:%s, r:%d",PINCTRL_STATE_RST_ACTIVE, ret);
-		nt36532_pinctrl = NULL;
-		goto err_pinctrl_failed;
+	if (IS_ERR_OR_NULL(nt36532_rst_active)) {
+		NVT_LOG("Optional pinctrl state %s not found\n", PINCTRL_STATE_RST_ACTIVE);
+		nt36532_rst_active = NULL;
 	}
 
 	nt36532_rst_suspend = pinctrl_lookup_state(
 				nt36532_pinctrl, PINCTRL_STATE_RST_SUSPEND);
-	if (IS_ERR_OR_NULL(nt36532_pinctrl)) {
-		ret = PTR_ERR(nt36532_pinctrl);
-		NVT_ERR("Failed to get pinctrl state:%s, r:%d",PINCTRL_STATE_RST_SUSPEND, ret);
-		nt36532_pinctrl = NULL;
-		goto err_pinctrl_failed;
+	if (IS_ERR_OR_NULL(nt36532_rst_suspend)) {
+		NVT_LOG("Optional pinctrl state %s not found\n", PINCTRL_STATE_RST_SUSPEND);
+		nt36532_rst_suspend = NULL;
 	}
 
 /* +PERIDOT-12531,fangzhihua.wt,20240918,add to fix current is biger than that needed 1-2mA after screenoff then close keyboard */
@@ -2974,20 +2978,16 @@ static int nvt_cs_init_dts(struct nvt_ts_data *ts)
 /*+chklst-98554,fangzhihua.wt,add, 20240330, add pinctrl ID0 to control VDD 1.8V*/
 	nt36532_gpio184_low = pinctrl_lookup_state(
 				nt36532_pinctrl, PINCTRL_STATE_GPIO184_LOW);
-	if (IS_ERR_OR_NULL(nt36532_pinctrl)) {
-		ret = PTR_ERR(nt36532_pinctrl);
-		NVT_ERR("Failed to get pinctrl state:%s, r:%d",PINCTRL_STATE_GPIO184_LOW, ret);
-		nt36532_pinctrl = NULL;
-		goto err_pinctrl_failed;
-	};
-	nt36532_gpio184_high= pinctrl_lookup_state(
+	if (IS_ERR_OR_NULL(nt36532_gpio184_low)) {
+		NVT_LOG("Failed to get pinctrl state:%s\n", PINCTRL_STATE_GPIO184_LOW);
+		nt36532_gpio184_low = NULL;
+	}
+	nt36532_gpio184_high = pinctrl_lookup_state(
 				nt36532_pinctrl, PINCTRL_STATE_GPIO184_HIGH);
-	if (IS_ERR_OR_NULL(nt36532_pinctrl)) {
-		ret = PTR_ERR(nt36532_pinctrl);
-		NVT_ERR("Failed to get pinctrl state:%s, r:%d",PINCTRL_STATE_GPIO184_HIGH, ret);
-		nt36532_pinctrl = NULL;
-		goto err_pinctrl_failed;
-	};
+	if (IS_ERR_OR_NULL(nt36532_gpio184_high)) {
+		NVT_LOG("Failed to get pinctrl state:%s\n", PINCTRL_STATE_GPIO184_HIGH);
+		nt36532_gpio184_high = NULL;
+	}
 /*-chklst-98554,fangzhihua.wt,add, 20240330, add pinctrl ID0 to control VDD 1.8V*/
 	return 0;
 
@@ -3003,14 +3003,20 @@ void nvt_set_cs(u8 val)
 {
 	NVT_LOG("nvt_set_cs =%d :0 is low, 1 is high \n", val);
 
-	if (val){
-		pinctrl_select_state(nt36532_pinctrl, nt36532_spi_cs_high);
-	}else{
-		pinctrl_select_state(nt36532_pinctrl, nt36532_spi_cs_low);
+	if (nt36532_pinctrl) {
+		if (val) {
+			if (!IS_ERR_OR_NULL(nt36532_spi_cs_high))
+				pinctrl_select_state(nt36532_pinctrl, nt36532_spi_cs_high);
+			if (!IS_ERR_OR_NULL(nt36532_gpio184_high))
+				pinctrl_select_state(nt36532_pinctrl, nt36532_gpio184_high);
+		} else {
+			if (!IS_ERR_OR_NULL(nt36532_spi_cs_low))
+				pinctrl_select_state(nt36532_pinctrl, nt36532_spi_cs_low);
 /*chklst-98554,fangzhihua.wt,add, 20240330, add pinctrl ID0 to control VDD 1.8V*/
-		pinctrl_select_state(nt36532_pinctrl, nt36532_gpio184_low);
+			if (!IS_ERR_OR_NULL(nt36532_gpio184_low))
+				pinctrl_select_state(nt36532_pinctrl, nt36532_gpio184_low);
+		}
 	}
-	//return 0;
 }
 
 /* +PERIDOT-12531,fangzhihua.wt,20240918,add to fix current is biger than that needed 1-2mA after screenoff then close keyboard */
@@ -3047,20 +3053,18 @@ int nt36532_ts_gpio_active(void)
 	int ret = 0;
 
 	if (nt36532_pinctrl) {
-		ret = pinctrl_select_state(nt36532_pinctrl,nt36532_int_active);
-
-		if (ret < 0) {
-			NVT_ERR("Failed to select int active state, ret:%d", ret);
-			goto err_resume_pinctrl;
+		if (!IS_ERR_OR_NULL(nt36532_int_active)) {
+			ret = pinctrl_select_state(nt36532_pinctrl, nt36532_int_active);
+			if (ret < 0)
+				NVT_ERR("Failed to select int active state, ret:%d", ret);
 		}
-		ret = pinctrl_select_state(nt36532_pinctrl,nt36532_rst_active);
-		if (ret < 0) {
-			NVT_ERR("Failed to select rst active state, ret:%d", ret);
-			goto err_resume_pinctrl;
+		if (!IS_ERR_OR_NULL(nt36532_rst_active)) {
+			ret = pinctrl_select_state(nt36532_pinctrl, nt36532_rst_active);
+			if (ret < 0)
+				NVT_ERR("Failed to select rst active state, ret:%d", ret);
 		}
 	}
-err_resume_pinctrl:
-		return ret;
+	return 0;
 }
 
 int nt36532_ts_gpio_suspend(void)
@@ -3068,19 +3072,18 @@ int nt36532_ts_gpio_suspend(void)
 	int ret = 0;
 
 	if (nt36532_pinctrl) {
-		ret  = pinctrl_select_state(nt36532_pinctrl, nt36532_int_suspend);
-		if (ret < 0) {
-			NVT_ERR("Failed to select int suspend state, ret:%d", ret);
-			goto err_suspend_pinctrl;
+		if (!IS_ERR_OR_NULL(nt36532_int_suspend)) {
+			ret = pinctrl_select_state(nt36532_pinctrl, nt36532_int_suspend);
+			if (ret < 0)
+				NVT_ERR("Failed to select int suspend state, ret:%d", ret);
 		}
-		ret  = pinctrl_select_state(nt36532_pinctrl,nt36532_rst_suspend);
-		if (ret < 0) {
-			NVT_ERR("Failed to select rst suspend state, ret:%d", ret);
-			goto err_suspend_pinctrl;
+		if (!IS_ERR_OR_NULL(nt36532_rst_suspend)) {
+			ret = pinctrl_select_state(nt36532_pinctrl, nt36532_rst_suspend);
+			if (ret < 0)
+				NVT_ERR("Failed to select rst suspend state, ret:%d", ret);
 		}
 	}
-err_suspend_pinctrl:
-	return ret;
+	return 0;
 }
 #endif
 //-chklst-98554,fangzhihua.wt,add,20240338,add pinctrl to cs,irq,int
@@ -3115,7 +3118,7 @@ static int nvt_charger_usb_statte(void)
 
 static void nvt_charger_notify_work(struct work_struct *work)
 {
-	int ret;
+	int __maybe_unused ret;
         int usb_plug_old_status = ts->usb_plug_status;
 
 	//NVT_LOG("nvt_charger_notify_work  start \n");
@@ -3816,7 +3819,7 @@ static void nvt_ts_remove(struct spi_device *client)
 	NVT_LOG("Removing driver...\n");
 	mutex_lock(&ts->lock);
 	WRITE_ONCE(bTouchIsAwake, 0);
-	WRITE_ONCE(ts->fw_update_stat, 0);
+	WRITE_ONCE(ts->fw_update_stat, 1);
 #if NVT_CUST_PROC_CMD
 	WRITE_ONCE(nvt_restore_ready, false);
 #endif
@@ -3935,7 +3938,7 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	NVT_LOG("Shutdown driver...\n");
 	mutex_lock(&ts->lock);
 	WRITE_ONCE(bTouchIsAwake, 0);
-	WRITE_ONCE(ts->fw_update_stat, 0);
+	WRITE_ONCE(ts->fw_update_stat, 1);
 #if NVT_CUST_PROC_CMD
 	WRITE_ONCE(nvt_restore_ready, false);
 #endif
@@ -4025,10 +4028,10 @@ Description:
 return:
 	Executive outcomes. 0---succeed.
 *******************************************************/
-static int32_t nvt_ts_suspend(struct device *dev)
+static int32_t __maybe_unused nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = {0};
-	int ret;
+	int __maybe_unused ret;
 
 	NVT_LOG("start\n");
 
@@ -4040,7 +4043,7 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	}
 	/* Close command/recovery admission before draining workers without lock. */
 	WRITE_ONCE(bTouchIsAwake, 0);
-	WRITE_ONCE(ts->fw_update_stat, 0);
+	WRITE_ONCE(ts->fw_update_stat, 1);
 	nvt_irq_enable(false);
 	nvt_reset_health_evidence();
 	mutex_unlock(&ts->lock);
@@ -4148,9 +4151,9 @@ Description:
 return:
 	Executive outcomes. 0---succeed.
 *******************************************************/
-static int32_t nvt_ts_resume(struct device *dev)
+static int32_t __maybe_unused nvt_ts_resume(struct device *dev)
 {
-	int ret;
+	int __maybe_unused ret;
 
 	mutex_lock(&ts->lock);
 	if (bTouchIsAwake) {
@@ -4188,9 +4191,7 @@ static int32_t nvt_ts_resume(struct device *dev)
 	*/
 #endif
 	nvt_set_cs(1);
-	ret = nt36532_ts_gpio_active();
-	if (ret < 0)
-		return ret;
+	nt36532_ts_gpio_active();
 /* -PERIDOT-12531,fangzhihua.wt,20240918,add to fix current is biger than that needed 1-2mA after screenoff then close keyboard */
 #endif
 //-chklst-98554,fangzhihua.wt,add,20240338,add pinctrl to cs,irq,int
@@ -4199,7 +4200,8 @@ static int32_t nvt_ts_resume(struct device *dev)
 	NVT_LOG("start\n");
 	// please make sure display reset(RESX) sequence and mipi dsi cmds sent before this
 #if NVT_TOUCH_SUPPORT_HW_RST
-	gpio_set_value(ts->reset_gpio, 1);
+	if (gpio_is_valid(ts->reset_gpio))
+		gpio_set_value(ts->reset_gpio, 1);
 #endif
 
 #if BOOT_UPDATE_FIRMWARE
@@ -4207,16 +4209,19 @@ static int32_t nvt_ts_resume(struct device *dev)
 #endif
 	WRITE_ONCE(ts->fw_update_stat, 0);
 	WRITE_ONCE(bTouchIsAwake, 1);
+	nvt_release_contacts();
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);
 	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
 			msecs_to_jiffies(NVT_TOUCH_ESD_CHECK_PERIOD));
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
+
 	/* Arm passive health checks while the panel is on. */
 	nvt_health_start();
 #if BOOT_UPDATE_FIRMWARE
-	/* Firmware completion, not a timer alone, admits IRQs and settings. */
+	/* Deep sleep loses the controller's volatile runtime image. The firmware
+	 * worker reloads SRAM and enables IRQ only after the IC is ready. */
 	nvt_queue_fw_update(200);
 #else
 	ret = nvt_check_fw_reset_state(RESET_STATE_REK_FINISH);
@@ -4397,6 +4402,7 @@ static int nvt_mtk_drm_notifier_callback(struct notifier_block *nb,
         return -1;
     }
 
+    mutex_lock(&nvt_lifecycle_lock);
     if (event == MTK_DISP_EARLY_EVENT_BLANK) {
         if (*blank == MTK_DISP_BLANK_POWERDOWN) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
@@ -4408,6 +4414,7 @@ static int nvt_mtk_drm_notifier_callback(struct notifier_block *nb,
 			nvt_ts_resume(&ts->client->dev);
 		}
 	}
+    mutex_unlock(&nvt_lifecycle_lock);
 
     return 0;
 }

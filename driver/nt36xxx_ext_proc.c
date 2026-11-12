@@ -994,7 +994,7 @@ int32_t nvt_ext_cmd_store(uint8_t u8Cmd, uint8_t u8subCmd)
 #define NVT_REK_MIN_GAP_MS 20000
 #define NVT_REK_RETRY_MS 1500
 #define NVT_REK_MAX_RETRIES 40
-#define NVT_REK_PERIODIC_MIN_MS 600000
+#define NVT_REK_PERIODIC_MIN_MS 10000
 
 static struct proc_dir_entry *NVT_proc_rek_entry;
 static unsigned long nvt_rek_last_activity;
@@ -1005,7 +1005,7 @@ static unsigned int nvt_rek_retries;
 static bool nvt_rek_inited;
 static bool nvt_rek_enabled;
 static bool nvt_rek_periodic;
-static unsigned int rek_interval_ms;
+static unsigned int rek_interval_ms = 30000;  /* Aphelion: self-heal cadence */
 static DEFINE_MUTEX(nvt_rek_mutex);
 static DEFINE_SPINLOCK(nvt_rek_state_lock);
 static void nvt_rek_work_func(struct work_struct *work);

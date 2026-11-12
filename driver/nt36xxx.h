@@ -226,9 +226,9 @@ extern const uint16_t gesture_key_array[];
 #else /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) */
   #if IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
    #define NVT_QCOM_PANEL_EVENT_NOTIFY 1
-  #elif IS_ENABLED(CONFIG_DRM_MEDIATEK_V2)
+  #else
    #define NVT_MTK_DRM_NOTIFY 1
- #endif
+  #endif
 #endif
 
 //+P98300AA1-2658,fangzhihua.wt,add,20240228, add tp info
