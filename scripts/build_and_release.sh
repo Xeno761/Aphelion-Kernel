@@ -93,7 +93,7 @@ echo "[*] Synchronizing to Windows release directory..."
 mkdir -p "${RELEASE_DIR}"
 
 # Wipe old released build to prevent disk waste
-rm -rf "${RELEASE_DIR:?}"/*
+find "${RELEASE_DIR}" -maxdepth 1 -type f ! -name "*.zip" -delete
 
 # Copy new verified raw kernel and config
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -127,6 +127,18 @@ else
 fi
 
 sha256sum "${RELEASE_DIR}/Image" > "${RELEASE_DIR}/Image.sha256"
+
+# Build custom Novatek touch driver module if present
+if [ -d "${KERNEL_DIR}/driver" ]; then
+    echo "[*] Building Novatek NT36532 vendor module (nt36532.ko)..."
+    make -C "${OUT_DIR}" M="${KERNEL_DIR}/driver" CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI=m ARCH="${ARCH}" LLVM=1 -j$(nproc) modules > /dev/null 2>&1 || true
+    if [ -f "${KERNEL_DIR}/driver/nt36532.ko" ]; then
+        llvm-strip --strip-unneeded -o "${RELEASE_DIR}/nt36532.ko" "${KERNEL_DIR}/driver/nt36532.ko"
+        sha256sum "${RELEASE_DIR}/nt36532.ko" > "${RELEASE_DIR}/nt36532.ko.sha256"
+        echo "[+] Novatek vendor module packaged (stripped): ${RELEASE_DIR}/nt36532.ko"
+    fi
+fi
+
 
 # 8. Kbuild Optimization vs. Optional Storage Cleanup
 if [ "$PRUNE_OUT" = true ]; then
