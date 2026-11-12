@@ -39,7 +39,7 @@
 ### 6. 🛡️ System Hygiene & Power Efficiency
 * **MTK Wi-Fi Spam Suppression:** Suppressed recurring kernel log flood from wlan_drv_gen4m_6897 (halSetFWOwn, kalPerMonUpdate, link metrics) that was previously consuming over 92% of printk bandwidth and causing CPU churn.
 * **Debug Tax Elimination:** Stripped runtime UBSAN overhead, stack zeroing tax, and debug accounting overhead from release builds.
-* **Security & Root Subsystem:** ReSukiSU/BakaSU v4.2.0-rc1 (35134) with SUSFS v2.3.0 inline hooks + Baseband Guard (BBG) partition protection.
+* **Security & Root Subsystem:** ReSukiSU/BakaSU v4.2.0-rc1 (v35134) with SUSFS v2.3.0 inline hooks + Baseband Guard (BBG) partition protection.
 
 ---
 
@@ -47,22 +47,22 @@
 
 | File | SHA-256 Checksum | Description |
 | :--- | :--- | :--- |
-| **oot.img** | 24f1b1c5f81cfc060eb22797acd3636f36cc2bc3862b742f965fb6a5eb84ba64 | Flashable AVB-signed boot image (67,108,864 bytes) |
-| **Image** | 05d15cb1d19ee1b8dffb0885e493be8120d58ca9d394e1071d7945d475ef9e7 | Raw uncompressed ARM64 kernel Image (36,571,648 bytes) |
+| **boot.img** | 24f1b1c5f81cfc060eb22797acd3636f36cc2bc3862b742f965fb6a5eb84ba64 | Flashable AVB-signed boot image (67,108,864 bytes) |
+| **Image** | b05d15cb1d19ee1b8dffb0885e493be8120d58ca9d394e1071d7945d475ef9e7 | Raw uncompressed ARM64 kernel Image (36,571,648 bytes) |
 
 ---
 
 ## 🛠️ Flashing Instructions
 
 ### Via Fastboot (PC / ADB):
-`ash
+```bash
 fastboot flash boot boot.img
 fastboot reboot
-`
+```
 
 ### Via Root / Termux / Recovery:
-`ash
+```bash
 dd if=/sdcard/boot.img of=/dev/block/by-name/boot_a
 dd if=/sdcard/boot.img of=/dev/block/by-name/boot_b
 reboot
-`
+```
