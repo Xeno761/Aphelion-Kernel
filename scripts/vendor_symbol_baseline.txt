@@ -1,0 +1,120 @@
+# Aphelion — known-unresolved vendor module symbols.
+#
+# The pre-flight audit cross-checks every undefined symbol in every extracted
+# vendor module against this kernel's exports (vmlinux + the vendor modules we
+# have). Anything listed here is EXPECTED to be unresolved against that set;
+# anything new is fatal.
+#
+# None of these is caused by a config choice in this tree: they were all
+# unresolved before SLUB_DEBUG / WQ_WATCHDOG / PM_DEBUG were disabled, and none
+# of them relates to those options.
+#
+#   1. Provided at runtime by GKI modules living in the device's system_dlkm
+#      partition (bluetooth.ko, rfkill.ko, ...). That partition was never
+#      extracted here: images/ contains boot, vendor_boot and vendor_dlkm but
+#      no system_dlkm, so the audit cannot see those providers.
+#
+#      Verified on the device: `rfkill` and `bluetooth` are loaded modules with
+#      cfg80211, nfc, bt_drv_6897, hci_uart, btsdio among their users. These
+#      symbols DO resolve at runtime, which is also why the matching kernel
+#      options must stay =m: building rfkill/BT into vmlinux would collide with
+#      the GKI module and stop it loading.
+#
+#      arc4_crypt, arc4_setkey, rfkill_*, hci_*
+#
+#   2. Oplus scheduler extensions (scx/hmbird) whose exporting module is not in
+#      either extracted image, and which this source tree does not export:
+#
+#      __scx_ops_enabled, scx_*, task_is_scx, hmbird_dir, iso_masks,
+#      __tracepoint_android_*_scx_*, __tracepoint_android_*_hmbird_*,
+#      __traceiter_android_vh_scx_update_task_scale_time
+#
+#   3. Oplus display / touch / sensor bus hooks, same situation:
+#
+#      register_lcdinfo_notifier, unregister_lcdinfo_notifier,
+#      touchpanel_event_*, tp_judge_ic_match, tp_util_get_vendor,
+#      magcvr_*, olc_raise_exception, oplus_kevent_fb,
+#      oplus_mrdump_mini_add_misc, oplus_read_mm_config,
+#      get_support_sensor_list, get_pogo_keyboard_operations
+#
+#   4. Lenovo / MTK bootloader and helpers from source this tree lacks:
+#
+#      get_boot_mode, get_eng_version, get_PCB_Version, verified_bootstate,
+#      is_confidential, register_devinfo, request_firmware_select,
+#      ext_module_loaded, fb_kevent_send_to_user, get_mem_cgroup_app_name,
+#      get_mem_cgroup_app_uid, get_next_memcg, get_next_memcg_break,
+#      get_slabinfo, osvelte_kallsyms_lookup_name,
+#      __tracepoint_android_vh_get_util,
+#      __tracepoint_android_vh_init_adjust_zone_wmark,
+#      __tracepoint_android_vh_throttle_direct_reclaim_bypass,
+#      __tracepoint_android_vh_tick_nohz_idle_stop_tick
+#
+# Entries 2-4 belong to modules that do not load on this device, which is why
+# the kernel boots without them. Prune entries as they get fixed.
+
+__scx_ops_enabled
+__traceiter_android_vh_scx_update_task_scale_time
+__tracepoint_android_rvh_hmbird_update_load_enable
+__tracepoint_android_vh_check_preempt_curr_scx
+__tracepoint_android_vh_get_util
+__tracepoint_android_vh_hmbird_init_task
+__tracepoint_android_vh_hmbird_update_load
+__tracepoint_android_vh_init_adjust_zone_wmark
+__tracepoint_android_vh_scx_consume_dsq_allowed
+__tracepoint_android_vh_scx_cpu_exclusive
+__tracepoint_android_vh_scx_select_cpu_dfl
+__tracepoint_android_vh_scx_update_task_scale_time
+__tracepoint_android_vh_throttle_direct_reclaim_bypass
+__tracepoint_android_vh_tick_nohz_idle_stop_tick
+arc4_crypt
+arc4_setkey
+ext_module_loaded
+fb_kevent_send_to_user
+get_PCB_Version
+get_boot_mode
+get_eng_version
+get_mem_cgroup_app_name
+get_mem_cgroup_app_uid
+get_next_memcg
+get_next_memcg_break
+get_pogo_keyboard_operations
+get_slabinfo
+get_support_sensor_list
+hci_alloc_dev_priv
+hci_free_dev
+hci_recv_frame
+hci_register_dev
+hci_unregister_dev
+hmbird_dir
+is_confidential
+iso_masks
+magcvr_event_call_notifier
+magcvr_set_current_pos
+olc_raise_exception
+oplus_kevent_fb
+oplus_mrdump_mini_add_misc
+oplus_read_mm_config
+osvelte_kallsyms_lookup_name
+register_devinfo
+register_lcdinfo_notifier
+request_firmware_select
+rfkill_alloc
+rfkill_blocked
+rfkill_destroy
+rfkill_register
+rfkill_resume_polling
+rfkill_set_hw_state_reason
+rfkill_unregister
+scx_get_md_info
+scx_irq_work_lastq_ws
+scx_sched_rq_stats
+scx_systemui_pid
+task_is_scx
+touchpanel_event_call_notifier
+touchpanel_event_register_notifier
+touchpanel_event_unregister_notifier
+tp_judge_ic_match
+tp_judge_ic_match_commandline
+tp_util_get_vendor
+unregister_lcdinfo_notifier
+verified_bootstate
