@@ -130,23 +130,21 @@ Do not flash `vendor_boot`, `dtbo`, `vbmeta`, or `*_dlkm` partitions during stan
 
 ### 3. Touchscreen Fix (Novatek NT36532) & Vendor Boot Repacker
 
-For standard TB373FU installations, flashing `boot.img` alone is sufficient because Aphelion preserves 100% vendor KMI and module ABI compatibility with the stock touchscreen driver.
-
-However, if you are porting, building custom ROMs, or running a setup where the touchscreen is unresponsive, you can bake our native **Novatek NT36532** touchscreen driver (`nt36532.ko`) directly into your own `vendor_boot.img`:
+If you experience touch unresponsiveness, input lag, or touchscreen driver initialization failure after flashing or firmware updates, you can bake our fixed **Novatek NT36532** touch driver (`nt36532.ko`) directly into your `vendor_boot.img`:
 
 ```bash
-# 1. Bake the matching touch driver into your stock vendor_boot.img:
+# 1. Bake the touch fix into your stock vendor_boot.img:
 bash scripts/repack_vendor_boot.sh path/to/your_stock_vendor_boot.img
 
-# 2. Flash the generated vendor_boot to your active slot in fastbootd:
+# 2. Flash the fixed vendor_boot to your active slot in fastbootd:
 fastboot flash vendor_boot_a released/vendor_boot.img
 ```
 
-#### How the Automated Repacker Works:
-1. **Compiles from Source**: Builds the standalone Novatek driver from [`driver/`](driver/) against kernel symbols using Clang.
+#### How the Automated Repacker Fixes Touch:
+1. **Compiles Driver Fix from Source**: Builds the updated Novatek driver directly from [`driver/`](driver/) against kernel symbols using Clang.
 2. **Strips Debug Symbols**: Applies `llvm-strip --strip-unneeded` to minimize memory footprint.
 3. **Unpacks Ramdisk**: Extracts `vendor_ramdisk/ramdisk.cpio` from your base `vendor_boot.img` using `magiskboot`.
-4. **Injects Driver**: Replaces `lib/modules/nt36532.ko` with the newly compiled module and regenerates the CPIO archive.
+4. **Replaces Touch Module**: Injects the fixed `nt36532.ko` into `lib/modules/` inside the ramdisk and regenerates the CPIO archive.
 5. **Repacks & Signs**: Re-assembles `vendor_boot.img` with `magiskboot` and signs it using AVB test keys (`SHA256_RSA2048`).
 6. **Optional Auto-Flash**: Append `--flash` while connected via ADB/fastbootd to flash directly to your device.
 

@@ -35,15 +35,13 @@ make -j$(nproc) ARCH=arm64 LLVM=1 O=/root/Aphelion-Kernel-out CC="ccache clang" 
 - **Kbuild `.o` Preservation:** Intermediate `.o` and `.cmd` object files are permanently preserved in `/root/Aphelion-Kernel-out`. For minor code changes or defconfig tweaks, incremental builds complete in **5 to 15 seconds**.
 - **ccache:** Secondary cache layer configured at 40 GB (`~/.ccache`) with compression and neutralized timestamps.
 
-## 4. Standalone Touch Driver & Vendor Boot Repacking
+## 4. Standalone Touch Fix & Vendor Boot Repacking
 
-The kernel build is completely decoupled from vendor boot images. Flashing `boot.img` is the standard procedure for TB373FU.
-
-If you specifically need to compile the Novatek NT36532 touchscreen driver or repack a custom `vendor_boot.img`:
+If you encounter touch unresponsiveness or touchscreen driver initialization failure, the Novatek NT36532 touch fix can be compiled and baked directly into `vendor_boot.img`:
 
 ```bash
 # In WSL:
 ./scripts/repack_vendor_boot.sh [path/to/stock_vendor_boot.img] [--flash]
 ```
 
-This compiles `driver/nt36532.ko` independently against kernel symbols, injects it into the vendor ramdisk, re-signs the image with AVB, and outputs `released/vendor_boot.img`.
+This compiles the touch fix in `driver/nt36532.ko` independently against kernel symbols, injects it into the vendor ramdisk, re-signs the image with AVB, and outputs `released/vendor_boot.img`.
