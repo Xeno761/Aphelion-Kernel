@@ -442,6 +442,7 @@ int nvt_health_proc_show(struct seq_file *m, void *v);
 #if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
 int32_t nvt_ext_cmd_store(uint8_t cmd, uint8_t arg);
 void nvt_rek_note_activity(void);
+void nvt_rek_note_release(void);
 void nvt_rek_schedule(unsigned int delay_ms);
 int nvt_rek_init(void);
 void nvt_rek_deinit(void);

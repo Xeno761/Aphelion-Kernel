@@ -990,9 +990,10 @@ int32_t nvt_ext_cmd_store(uint8_t u8Cmd, uint8_t u8subCmd)
 }
 
 #define NVT_CMD_REK 0x23
-#define NVT_REK_IDLE_MS 1500
+#define NVT_REK_IDLE_MS 250
 #define NVT_REK_MIN_GAP_MS 20000
 #define NVT_REK_RETRY_MS 1500
+#define NVT_REK_RELEASE_DELAY_MS 250
 #define NVT_REK_MAX_RETRIES 40
 #define NVT_REK_PERIODIC_MIN_MS 10000
 
@@ -1005,6 +1006,8 @@ static unsigned int nvt_rek_retries;
 static bool nvt_rek_inited;
 static bool nvt_rek_enabled;
 static bool nvt_rek_periodic;
+static bool nvt_rek_pending;
+static bool nvt_rek_release_armed;
 static unsigned int rek_interval_ms = 30000;  /* Aphelion: self-heal cadence */
 static DEFINE_MUTEX(nvt_rek_mutex);
 static DEFINE_SPINLOCK(nvt_rek_state_lock);
@@ -1026,6 +1029,8 @@ static int nvt_rek_interval_set(const char *value, const struct kernel_param *kp
 	if (!interval && nvt_rek_periodic) {
 		cancel_delayed_work(&nvt_rek_work);
 		nvt_rek_periodic = false;
+		nvt_rek_pending = false;
+		nvt_rek_release_armed = false;
 	} else if (interval && nvt_rek_inited && nvt_rek_enabled &&
 		   READ_ONCE(bTouchIsAwake) && !delayed_work_pending(&nvt_rek_work)) {
 		nvt_rek_periodic = true;
@@ -1046,6 +1051,24 @@ MODULE_PARM_DESC(rek_interval_ms, "Idle-only periodic ReK: 0 disables; 600000-86
 void nvt_rek_note_activity(void)
 {
 	WRITE_ONCE(nvt_rek_last_activity, jiffies);
+}
+
+void nvt_rek_note_release(void)
+{
+	unsigned long flags;
+	unsigned long last = READ_ONCE(nvt_rek_last);
+
+	spin_lock_irqsave(&nvt_rek_state_lock, flags);
+	if (nvt_rek_inited && nvt_rek_enabled && nvt_rek_pending &&
+	    !nvt_rek_release_armed &&
+	    READ_ONCE(bTouchIsAwake) &&
+	    (!last || time_after_eq(jiffies, last +
+					  msecs_to_jiffies(NVT_REK_MIN_GAP_MS)))) {
+		nvt_rek_release_armed = true;
+		mod_delayed_work(system_wq, &nvt_rek_work,
+				 msecs_to_jiffies(NVT_REK_RELEASE_DELAY_MS));
+	}
+	spin_unlock_irqrestore(&nvt_rek_state_lock, flags);
 }
 
 /* ts->lock protects input reporting, including stationary contacts and hover. */
@@ -1089,7 +1112,7 @@ static int nvt_rek(bool force)
 
 	/* Use the locked helper, never recursively lock ts->lock. */
 	ret = nvt_ext_cmd_store_locked(NVT_CMD_REK, 0x00);
-	nvt_rek_last = jiffies ? jiffies : 1;
+	WRITE_ONCE(nvt_rek_last, jiffies ? jiffies : 1);
 	nvt_rek_count++;
 	nvt_rek_last_ret = ret;
 	NVT_LOG("ReK %s: ret=%d count=%u\n",
@@ -1117,6 +1140,8 @@ static void nvt_rek_work_func(struct work_struct *work)
 	spin_unlock_irqrestore(&nvt_rek_state_lock, flags);
 	ret = nvt_rek(false);
 	spin_lock_irqsave(&nvt_rek_state_lock, flags);
+	nvt_rek_release_armed = false;
+	nvt_rek_pending = ret == -EBUSY;
 	/* A new resume/charger request must keep its earlier deadline. */
 	if (nvt_rek_inited && nvt_rek_enabled && READ_ONCE(bTouchIsAwake) &&
 	    !delayed_work_pending(&nvt_rek_work) &&
@@ -1144,6 +1169,8 @@ void nvt_rek_schedule(unsigned int delay_ms)
 	if (nvt_rek_inited && READ_ONCE(bTouchIsAwake)) {
 		nvt_rek_enabled = true;
 		nvt_rek_periodic = false;
+		nvt_rek_pending = false;
+		nvt_rek_release_armed = false;
 		nvt_rek_retries = 0;
 		mod_delayed_work(system_wq, &nvt_rek_work,
 				 msecs_to_jiffies(delay_ms));
@@ -1158,6 +1185,8 @@ void nvt_rek_cancel(void)
 	spin_lock_irqsave(&nvt_rek_state_lock, flags);
 	nvt_rek_enabled = false;
 	nvt_rek_periodic = false;
+	nvt_rek_pending = false;
+	nvt_rek_release_armed = false;
 	if (nvt_rek_inited)
 		cancel_delayed_work(&nvt_rek_work);
 	spin_unlock_irqrestore(&nvt_rek_state_lock, flags);
@@ -1203,6 +1232,8 @@ int nvt_rek_init(void)
 	WRITE_ONCE(nvt_rek_last_activity, jiffies);
 	WRITE_ONCE(nvt_rek_enabled, true);
 	WRITE_ONCE(nvt_rek_inited, true);
+	WRITE_ONCE(nvt_rek_pending, false);
+	WRITE_ONCE(nvt_rek_release_armed, false);
 	NVT_proc_rek_entry = proc_create("nvt_rek", 0600, NULL, &nvt_rek_fops);
 	if (!NVT_proc_rek_entry)
 		NVT_ERR("create /proc/nvt_rek failed; automatic recovery remains available\n");
@@ -1216,6 +1247,8 @@ void nvt_rek_deinit(void)
 	spin_lock_irqsave(&nvt_rek_state_lock, flags);
 	nvt_rek_inited = false;
 	nvt_rek_enabled = false;
+	nvt_rek_pending = false;
+	nvt_rek_release_armed = false;
 	spin_unlock_irqrestore(&nvt_rek_state_lock, flags);
 	if (NVT_proc_rek_entry) {
 		proc_remove(NVT_proc_rek_entry);

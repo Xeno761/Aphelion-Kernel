@@ -2368,12 +2368,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	}
 #endif
 
-#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
-	/* Only a real contact defers recalibration: a controller that keeps
-	 * interrupting while reporting nothing must still be corrected. */
-	if (finger_cnt > 0 || (ts->pen_support && (pen_pressure > 0 || pen_distance > 0)))
-		nvt_rek_note_activity();
-#endif
 	input_sync(ts->input_dev);
 
 	nvt_diag.touch_frames++;
@@ -2537,6 +2531,16 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		nvt_diag.pen_frames++;
 		input_sync(ts->pen_input_dev);
 	} /* if (ts->pen_support) */
+
+#if NVT_TOUCH_EXT_PROC && NVT_CUST_PROC_CMD
+	/* Do not recalibrate over a real finger or pen. If a periodic ReK became
+	 * due during gameplay, use the first short all-contacts-released gap. */
+	if (finger_cnt > 0 ||
+	    (ts->pen_support && (pen_pressure > 0 || pen_distance > 0)))
+		nvt_rek_note_activity();
+	else
+		nvt_rek_note_release();
+#endif
 
 XFER_ERROR:
 	if (!bTouchIsAwake || !ts->irq_enabled)
