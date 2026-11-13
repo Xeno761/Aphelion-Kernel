@@ -206,7 +206,8 @@ static inline void __mm_zero_struct_page(struct page *page)
  * that.
  */
 #define MAPCOUNT_ELF_CORE_MARGIN	(5)
-#define DEFAULT_MAX_MAP_COUNT	(USHRT_MAX - MAPCOUNT_ELF_CORE_MARGIN)
+/* SteamOS / PC gaming emulation (Wine/Proton/Box64/Winlator) standard */
+#define DEFAULT_MAX_MAP_COUNT	(2147483642)
 
 extern int sysctl_max_map_count;
 
