@@ -6,10 +6,15 @@ set -e
 # ==========================================
 
 WINDOWS_PROJECT_ROOT="/mnt/c/Users/Namit/Downloads/Aphelion-Kernel"
-RELEASE_DIR="${WINDOWS_PROJECT_ROOT}/released"
 KERNEL_DIR="/root/Aphelion-Kernel"
 OUT_DIR="/root/Aphelion-Kernel-out"
 ARCH="arm64"
+
+if [ -d "${WINDOWS_PROJECT_ROOT}/released" ]; then
+    RELEASE_DIR="${WINDOWS_PROJECT_ROOT}/released"
+else
+    RELEASE_DIR="${KERNEL_DIR}/released"
+fi
 
 # Clang Toolchain Auto-detection
 if [ -d "$HOME/toolchains/clang-r487747c/bin" ]; then
@@ -21,11 +26,17 @@ else
 fi
 export PATH="${CLANG_DIR}:${PATH}"
 
+CUSTOM_VBOOT=""
 DO_FLASH=false
 for arg in "$@"; do
     case "$arg" in
         --flash)
             DO_FLASH=true
+            ;;
+        *)
+            if [ -f "$arg" ]; then
+                CUSTOM_VBOOT="$(readlink -f "$arg")"
+            fi
             ;;
     esac
 done
@@ -59,13 +70,21 @@ echo "[+] Stripped module created: ${STRIPPED_MODULE} ($(stat -c%s "${STRIPPED_M
 echo "[+] SHA256: $(cat "${RELEASE_DIR}/nt36532.ko.sha256")"
 
 # 3. Repack into vendor_boot.img
-VENDOR_BOOT_TEMPLATE="${WINDOWS_PROJECT_ROOT}/images/vendor_boot.img"
-KEY_FILE="${KERNEL_DIR}/Documentation/releases/testkey_rsa2048.pem"
-
-if [ ! -f "${VENDOR_BOOT_TEMPLATE}" ]; then
-    echo "[-] ERROR: Base template ${VENDOR_BOOT_TEMPLATE} not found!"
+if [ -n "${CUSTOM_VBOOT}" ]; then
+    VENDOR_BOOT_TEMPLATE="${CUSTOM_VBOOT}"
+elif [ -f "${WINDOWS_PROJECT_ROOT}/images/vendor_boot.img" ]; then
+    VENDOR_BOOT_TEMPLATE="${WINDOWS_PROJECT_ROOT}/images/vendor_boot.img"
+elif [ -f "${KERNEL_DIR}/images/vendor_boot.img" ]; then
+    VENDOR_BOOT_TEMPLATE="${KERNEL_DIR}/images/vendor_boot.img"
+elif [ -f "./vendor_boot.img" ]; then
+    VENDOR_BOOT_TEMPLATE="./vendor_boot.img"
+else
+    echo "[-] ERROR: vendor_boot.img template not found!"
+    echo "[-] Usage: bash $0 [path/to/stock_vendor_boot.img] [--flash]"
     exit 1
 fi
+echo "[*] Using base vendor_boot: ${VENDOR_BOOT_TEMPLATE}"
+KEY_FILE="${KERNEL_DIR}/Documentation/releases/testkey_rsa2048.pem"
 
 echo "[*] Unpacking base vendor_boot.img..."
 WORK_DIR=$(mktemp -d)

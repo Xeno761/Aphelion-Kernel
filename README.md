@@ -53,6 +53,7 @@ The kernel tree is aligned directly with Google's official Android Common Kernel
 - **16-Way SLAB Heap Randomization (`CONFIG_RANDOM_KMALLOC_CACHES=y`):** Backported from Linux 6.6. Replaces predictable kmalloc caches with 16 cryptographically randomized sub-caches per size class, mathematically defeating Use-After-Free (UAF) and heap-spraying exploits without breaking vendor module KMI.
 - **ReSukiSU / BakaSU:** Embedded with SUSFS inline hooks (`sus_path`, `sus_mount`, `sus_kstat`, `sus_map`).
 - **Multi-Manager Certificate Recognition:** Native support for Official KernelSU, ReSukiSU/BakaSU, MKSU, RKSU, SukiSU-Ultra, KoWSU, KernelSU-Next, and Wild KSU.
+- **Dynamic Manager UAPI Auto-Negotiation:** Built-in runtime sniffer dynamically detects the manager's UAPI requirements directly from `libkernelsu.so`, seamlessly supporting KernelSU-Next v3.4.0 (UAPI 4), KernelSU-Next v3.4.2 (UAPI 5), and FinaSU / BakaSU / future releases (UAPI 6/7) without warnings or disabled tabs.
 - **Baseband Guard (BBG):** LSM module providing protection against unauthorized userspace access to sensitive modem, NVRAM, and radio partitions.
 
 ### 4. PC Gaming & Windows Emulation (NTSYNC)
@@ -125,9 +126,31 @@ fastboot flash boot_a boot.img
 fastboot reboot
 ```
 
-Do not flash `vendor_boot`, `dtbo`, `vbmeta`, or `*_dlkm` partitions.
+Do not flash `vendor_boot`, `dtbo`, `vbmeta`, or `*_dlkm` partitions during standard installation.
 
-### 3. Rollback Procedure
+### 3. Touchscreen Fix (Novatek NT36532) & Vendor Boot Repacker
+
+For standard TB373FU installations, flashing `boot.img` alone is sufficient because Aphelion preserves 100% vendor KMI and module ABI compatibility with the stock touchscreen driver.
+
+However, if you are porting, building custom ROMs, or running a setup where the touchscreen is unresponsive, you can bake our native **Novatek NT36532** touchscreen driver (`nt36532.ko`) directly into your own `vendor_boot.img`:
+
+```bash
+# 1. Bake the matching touch driver into your stock vendor_boot.img:
+bash scripts/repack_vendor_boot.sh path/to/your_stock_vendor_boot.img
+
+# 2. Flash the generated vendor_boot to your active slot in fastbootd:
+fastboot flash vendor_boot_a released/vendor_boot.img
+```
+
+#### How the Automated Repacker Works:
+1. **Compiles from Source**: Builds the standalone Novatek driver from [`driver/`](driver/) against kernel symbols using Clang.
+2. **Strips Debug Symbols**: Applies `llvm-strip --strip-unneeded` to minimize memory footprint.
+3. **Unpacks Ramdisk**: Extracts `vendor_ramdisk/ramdisk.cpio` from your base `vendor_boot.img` using `magiskboot`.
+4. **Injects Driver**: Replaces `lib/modules/nt36532.ko` with the newly compiled module and regenerates the CPIO archive.
+5. **Repacks & Signs**: Re-assembles `vendor_boot.img` with `magiskboot` and signs it using AVB test keys (`SHA256_RSA2048`).
+6. **Optional Auto-Flash**: Append `--flash` while connected via ADB/fastbootd to flash directly to your device.
+
+### 4. Rollback Procedure
 
 If the device fails to boot:
 1. Re-enter fastbootd.
