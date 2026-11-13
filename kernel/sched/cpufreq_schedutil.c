@@ -204,7 +204,7 @@ static bool sugov_iowait_reset(struct sugov_cpu *sg_cpu, u64 time,
 	if (delta_ns <= TICK_NSEC)
 		return false;
 
-	sg_cpu->iowait_boost = set_iowait_boost ? IOWAIT_BOOST_MIN : 0;
+	sg_cpu->iowait_boost = set_iowait_boost ? SCHED_CAPACITY_SCALE : 0;
 	sg_cpu->iowait_boost_pending = set_iowait_boost;
 
 	return true;
@@ -238,20 +238,18 @@ static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
 	if (!set_iowait_boost)
 		return;
 
-	/* Ensure boost doubles only one time at each request */
+	/* Ensure boost is flagged once per request */
 	if (sg_cpu->iowait_boost_pending)
 		return;
 	sg_cpu->iowait_boost_pending = true;
+	sg_cpu->sg_policy->limits_changed = true;
 
-	/* Double the boost at each request */
-	if (sg_cpu->iowait_boost) {
-		sg_cpu->iowait_boost =
-			min_t(unsigned int, sg_cpu->iowait_boost << 1, SCHED_CAPACITY_SCALE);
-		return;
-	}
-
-	/* First wakeup after IO: start with minimum boost */
-	sg_cpu->iowait_boost = IOWAIT_BOOST_MIN;
+	/*
+	 * Instant ramp-up: boost immediately to max capacity on I/O wakeup.
+	 * Paired with immediate decay upon completion, this eliminates
+	 * the slow multi-tick doubling ladder while keeping I/O latency minimal.
+	 */
+	sg_cpu->iowait_boost = SCHED_CAPACITY_SCALE;
 }
 
 /**
@@ -285,13 +283,14 @@ static void sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time)
 
 	if (!sg_cpu->iowait_boost_pending) {
 		/*
-		 * No boost pending; reduce the boost value.
+		 * Immediate decay upon I/O completion:
+		 * Rather than lingering across multiple tick/halving cycles (>>= 1),
+		 * drop the boost immediately to zero. With Fast-PELT 16ms, genuine
+		 * compute demand is tracked rapidly by util_avg, preventing
+		 * unnecessary cluster frequency pegging and battery drain.
 		 */
-		sg_cpu->iowait_boost >>= 1;
-		if (sg_cpu->iowait_boost < IOWAIT_BOOST_MIN) {
-			sg_cpu->iowait_boost = 0;
-			return;
-		}
+		sg_cpu->iowait_boost = 0;
+		return;
 	}
 
 	sg_cpu->iowait_boost_pending = false;
