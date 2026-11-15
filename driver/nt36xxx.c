@@ -2156,12 +2156,14 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	nvt_diag.max_irq_lock_ms = max(nvt_diag.max_irq_lock_ms,
 				      jiffies_to_msecs(jiffies - lock_start));
 #if NVT_PM_WAIT_BUS_RESUME_COMPLETE
-	if (ts->dev_pm_suspend) {
+	/* Allow wakeup gestures to process even if the device was in deep PM suspend */
+	if (ts->dev_pm_suspend && !bDoubleWakeupflag) {
 		nvt_diag.inactive_drops++;
 		goto XFER_ERROR;
 	}
 #endif
-	if (!bTouchIsAwake || !ts->irq_enabled) {
+	/* When screen is off (bTouchIsAwake == 0), only drop if gesture wakeup is NOT active */
+	if (!ts->irq_enabled || (!bTouchIsAwake && !bDoubleWakeupflag)) {
 		nvt_diag.inactive_drops++;
 		goto XFER_ERROR;
 	}
