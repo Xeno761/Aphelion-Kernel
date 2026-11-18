@@ -1310,23 +1310,40 @@ extern struct static_key_false susfs_is_uname_spoof_buffer_set;
 extern void susfs_spoof_uname(struct new_utsname* tmp);
 #endif
 
+#if IS_BUILTIN(CONFIG_KSU)
+#include "../KernelSU/kernel/feature/finasu_uts_view.h"
+static_assert(KSU_UTS_FIELD_RELEASE == (1U << 2));
+static_assert(KSU_UTS_FIELD_MACHINE == (1U << 4));
+#endif
+
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
 	struct new_utsname tmp;
+	u32 owned_mask = 0;
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
+#if IS_BUILTIN(CONFIG_KSU)
+	owned_mask = ksu_finasu_uts_view_current_mask();
+#endif
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
 		susfs_spoof_uname(&tmp);
+#if IS_BUILTIN(CONFIG_KSU)
+	/* Keep owned fields without changing SUSFS views for unrelated namespaces. */
+	if (owned_mask & KSU_UTS_FIELD_RELEASE)
+		strscpy(tmp.release, utsname()->release, sizeof(tmp.release));
+	if (owned_mask & KSU_UTS_FIELD_VERSION)
+		strscpy(tmp.version, utsname()->version, sizeof(tmp.version));
+#endif
 #endif
 	up_read(&uts_sem);
 	if (copy_to_user(name, &tmp, sizeof(tmp)))
 		return -EFAULT;
 
-	if (override_release(name->release, sizeof(name->release)))
+	if (!(owned_mask & (1U << 2)) && override_release(name->release, sizeof(name->release)))
 		return -EFAULT;
-	if (override_architecture(name))
+	if (!(owned_mask & (1U << 4)) && override_architecture(name))
 		return -EFAULT;
 	return 0;
 }

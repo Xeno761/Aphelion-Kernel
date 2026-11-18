@@ -51,6 +51,9 @@
 extern u32 susfs_ksu_sid;
 extern u32 susfs_priv_app_sid;
 extern struct static_key_false susfs_is_avc_log_spoofing_enabled;
+#if IS_BUILTIN(CONFIG_KSU)
+extern struct static_key_false ksu_avc_log_spoof_full_enabled;
+#endif
 #endif
 
 struct avc_entry {
@@ -738,24 +741,10 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 
 	rc = security_sid_to_context(sad->state, sad->tsid, &tcontext,
 				     &tcontext_len);
-#ifdef CONFIG_KSU_SUSFS
-	if (static_branch_likely(&susfs_is_avc_log_spoofing_enabled)) {
-		if (unlikely(sad->tsid == susfs_ksu_sid)) {
-			if (rc)
-				audit_log_format(ab, " tsid=%d", susfs_priv_app_sid);
-			else
-				audit_log_format(ab, " tcontext=%s", "u:r:priv_app:s0:c512,c768");
-			goto bypass_orig_flow;
-		}
-	}
-#endif
 	if (rc)
 		audit_log_format(ab, " tsid=%d", sad->tsid);
 	else
 		audit_log_format(ab, " tcontext=%s", tcontext);
-#ifdef CONFIG_KSU_SUSFS
-bypass_orig_flow:
-#endif
 	tclass = secclass_map[sad->tclass-1].name;
 	audit_log_format(ab, " tclass=%s", tclass);
 
@@ -803,6 +792,23 @@ noinline int slow_avc_audit(struct selinux_state *state,
 
 	if (WARN_ON(!tclass || tclass >= ARRAY_SIZE(secclass_map)))
 		return -EINVAL;
+
+#ifdef CONFIG_KSU_SUSFS
+	/* Change audit metadata only, never the access decision or cached AVC entry. */
+	if (static_branch_likely(&susfs_is_avc_log_spoofing_enabled)) {
+		u32 ksu_sid = READ_ONCE(susfs_ksu_sid);
+		u32 cover_sid = READ_ONCE(susfs_priv_app_sid);
+
+		if (ksu_sid && cover_sid && ksu_sid != cover_sid) {
+			if (tsid == ksu_sid)
+				tsid = cover_sid;
+#if IS_BUILTIN(CONFIG_KSU)
+			if (static_branch_unlikely(&ksu_avc_log_spoof_full_enabled) && ssid == ksu_sid)
+				ssid = cover_sid;
+#endif
+		}
+	}
+#endif
 
 	if (!a) {
 		a = &stack_data;
