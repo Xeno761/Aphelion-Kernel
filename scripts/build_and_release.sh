@@ -12,13 +12,11 @@ DEFCONFIG="${DEFCONFIG:-aphelion_defconfig}"
 ARCH="arm64"
 SUBARCH="arm64"
 
-# Clang Toolchain Auto-detection
-if [ -d "$HOME/toolchains/clang-r487747c/bin" ]; then
-    CLANG_DIR="$HOME/toolchains/clang-r487747c/bin"
-elif [ -d "/usr/lib/llvm-17/bin" ]; then
-    CLANG_DIR="/usr/lib/llvm-17/bin"
-else
-    CLANG_DIR="/usr/bin"
+# Use the vendor-validated AOSP compiler, never silently fall back.
+CLANG_DIR="$HOME/toolchains/clang-r487747c/bin"
+if [ ! -x "${CLANG_DIR}/clang" ]; then
+    echo "[-] Required AOSP Clang r487747c is missing."
+    exit 1
 fi
 export PATH="${CLANG_DIR}:${PATH}"
 
@@ -51,9 +49,9 @@ ccache -M 40G > /dev/null 2>&1
 ccache -o compression=true > /dev/null 2>&1
 ccache -o sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime > /dev/null 2>&1
 
-# 2. Kernel timestamp and environment flags (IST timezone with zero-padded 2-digit day)
+# 2. Stable build identity preserves reproducibility and ccache hits.
 export TZ='Asia/Kolkata'
-export KBUILD_BUILD_TIMESTAMP="$(TZ='Asia/Kolkata' LC_ALL=C date '+%a %b %d %H:%M:%S %Z %Y')"
+export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-}"
 export KBUILD_BUILD_USER='builder'
 export KBUILD_BUILD_HOST='wsl'
 export ARCH="${ARCH}"
@@ -85,10 +83,36 @@ ccache -s | head -n 8
 
 # 6.5 Zero-Bootloop Pre-Flight Symbol & Config Audit
 if [ -f "${KERNEL_DIR}/scripts/audit_vendor_symbols.py" ]; then
-    python3 "${KERNEL_DIR}/scripts/audit_vendor_symbols.py" "${OUT_DIR}" || echo "[!] Pre-flight audit warning: inspection tree missing, proceeding with packaging..."
+    python3 "${KERNEL_DIR}/scripts/audit_vendor_symbols.py" "${OUT_DIR}" \
+        --modules /root/inspect_modules/lib/modules \
+        --modules /root/inspect_modules/vendor_dlkm_stock/lib/modules \
+        --modules /root/inspect_modules/system_dlkm_stock/lib/modules
+else
+    echo "[-] Mandatory vendor-module audit script is missing."
+    exit 1
 fi
 
-# 7. Release & Storage Synchronization (Directly packages flashable boot.img)
+# 7. Verify the signed image before replacing the current release.
+BOOT_TEMPLATE="${WINDOWS_PROJECT_ROOT}/images/boot.img"
+KEY_FILE="${KERNEL_DIR}/Documentation/releases/testkey_rsa2048.pem"
+if [ ! -f "${BOOT_TEMPLATE}" ] || [ ! -f "${KEY_FILE}" ]; then
+    echo "[-] Required boot template or AVB signing key is missing."
+    exit 1
+fi
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "${WORK_DIR}"' EXIT
+cd "${WORK_DIR}"
+magiskboot unpack "${BOOT_TEMPLATE}"
+cp -p "${TARGET_IMAGE}" ./kernel
+magiskboot repack "${BOOT_TEMPLATE}"
+avbtool erase_footer --image ./new-boot.img > /dev/null 2>&1 || true
+avbtool add_hash_footer --image ./new-boot.img --partition_name boot --partition_size 67108864 \
+    --key "${KEY_FILE}" --algorithm SHA256_RSA2048
+avbtool verify_image --image ./new-boot.img --key "${KEY_FILE}"
+magiskboot unpack ./new-boot.img
+cmp "${TARGET_IMAGE}" ./kernel
+
+# Release & Storage Synchronization
 echo "[*] Synchronizing to Windows release directory..."
 mkdir -p "${RELEASE_DIR}"
 
@@ -99,34 +123,12 @@ find "${RELEASE_DIR}" -maxdepth 1 -type f ! -name "*.zip" -delete
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 cp -p "${TARGET_IMAGE}" "${RELEASE_DIR}/Image"
 cp -p "${OUT_DIR}/.config" "${RELEASE_DIR}/build_config_${TIMESTAMP}.config"
-
-# Repack and sign boot.img
-BOOT_TEMPLATE="${WINDOWS_PROJECT_ROOT}/images/boot.img"
-KEY_FILE="${KERNEL_DIR}/Documentation/releases/testkey_rsa2048.pem"
-
-if [ -f "${BOOT_TEMPLATE}" ]; then
-    echo "[*] Packaging flashable boot.img from ${BOOT_TEMPLATE}..."
-    WORK_DIR=$(mktemp -d)
-    cd "${WORK_DIR}"
-    magiskboot unpack "${BOOT_TEMPLATE}" > /dev/null 2>&1
-    cp -p "${TARGET_IMAGE}" ./kernel
-    magiskboot repack "${BOOT_TEMPLATE}" > /dev/null 2>&1
-    if [ -f "${KEY_FILE}" ]; then
-        echo "[*] Signing boot.img with AVB test key..."
-        avbtool erase_footer --image ./new-boot.img > /dev/null 2>&1 || true
-        avbtool add_hash_footer --image ./new-boot.img --partition_name boot --partition_size 67108864 --key "${KEY_FILE}" --algorithm SHA256_RSA2048 > /dev/null 2>&1
-    fi
-    cp -p ./new-boot.img "${RELEASE_DIR}/boot.img"
-    cd "${KERNEL_DIR}"
-    rm -rf "${WORK_DIR}"
-    echo "[+] Flashable boot.img created: ${RELEASE_DIR}/boot.img"
-    sha256sum "${RELEASE_DIR}/boot.img" > "${RELEASE_DIR}/boot.img.sha256"
-    echo "[+] Generated boot.img SHA256: $(cat "${RELEASE_DIR}/boot.img.sha256")"
-else
-    echo "[-] WARNING: Template ${BOOT_TEMPLATE} not found! boot.img could not be repacked."
-fi
-
-sha256sum "${RELEASE_DIR}/Image" > "${RELEASE_DIR}/Image.sha256"
+cp -p "${WORK_DIR}/new-boot.img" "${RELEASE_DIR}/boot.img"
+cd "${RELEASE_DIR}"
+sha256sum "build_config_${TIMESTAMP}.config" > "build_config_${TIMESTAMP}.config.sha256"
+sha256sum boot.img > boot.img.sha256
+sha256sum Image > Image.sha256
+cd "${KERNEL_DIR}"
 
 # 8. Kbuild Optimization vs. Optional Storage Cleanup
 if [ "$PRUNE_OUT" = true ]; then
