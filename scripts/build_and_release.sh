@@ -108,8 +108,9 @@ magiskboot repack "${BOOT_TEMPLATE}"
 avbtool erase_footer --image ./new-boot.img > /dev/null 2>&1 || true
 avbtool add_hash_footer --image ./new-boot.img --partition_name boot --partition_size 67108864 \
     --key "${KEY_FILE}" --algorithm SHA256_RSA2048
-avbtool verify_image --image ./new-boot.img --key "${KEY_FILE}"
-magiskboot unpack ./new-boot.img
+mv ./new-boot.img ./boot.img
+avbtool verify_image --image ./boot.img --key "${KEY_FILE}"
+magiskboot unpack ./boot.img
 cmp "${TARGET_IMAGE}" ./kernel
 
 # Release & Storage Synchronization
@@ -123,7 +124,7 @@ find "${RELEASE_DIR}" -maxdepth 1 -type f ! -name "*.zip" -delete
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 cp -p "${TARGET_IMAGE}" "${RELEASE_DIR}/Image"
 cp -p "${OUT_DIR}/.config" "${RELEASE_DIR}/build_config_${TIMESTAMP}.config"
-cp -p "${WORK_DIR}/new-boot.img" "${RELEASE_DIR}/boot.img"
+cp -p "${WORK_DIR}/boot.img" "${RELEASE_DIR}/boot.img"
 cd "${RELEASE_DIR}"
 sha256sum "build_config_${TIMESTAMP}.config" > "build_config_${TIMESTAMP}.config.sha256"
 sha256sum boot.img > boot.img.sha256
